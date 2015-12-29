@@ -3,6 +3,6 @@
     "ModuleName":"redis2aerospike",
     "ProxyType":"REDIS",
     "LocalProxyAddr":"unix:///tmp/redis2aerospike.sock",
-    "ModuleConfFile":"aerospike.module.conf"
+    "ModuleConfPath":"aerospike.module.conf"
 }
 ]

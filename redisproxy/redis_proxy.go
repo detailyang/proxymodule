@@ -63,7 +63,7 @@ func NewRedisProxy(addr string, module string, moduleConfig string, grace *grace
 		return common.LoadModuleConfFromFile(moduleConfig, v)
 	})
 	if err != nil {
-		redisLog.Errorf("init module configure failed: %v", err)
+		redisLog.Errorf("init module configure %v failed: %v", moduleConfig, err)
 		return nil
 	}
 	rp.proxyModule.RegisterCmd(rp.router)
@@ -71,7 +71,11 @@ func NewRedisProxy(addr string, module string, moduleConfig string, grace *grace
 }
 
 func (self *RedisProxy) Start() {
+	defer redisLog.Flush()
+	self.wg.Add(1)
+	defer self.wg.Done()
 	redisLog.Infof("redis proxy module %v on : %v", self.proxyModule.GetProxyName(), self.laddr)
+	defer redisLog.Infof("redis proxy %v stopped.", self.proxyModule.GetProxyName())
 
 	var err error
 	if self.grace != nil {
@@ -90,7 +94,6 @@ func (self *RedisProxy) Start() {
 	}
 
 	self.ServeRedis()
-	redisLog.Infof("redis proxy %v stopped.", self.proxyModule.GetProxyName())
 }
 
 func (self *RedisProxy) Stop() {
