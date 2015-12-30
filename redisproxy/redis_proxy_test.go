@@ -22,6 +22,9 @@ func newTestLogger(t *testing.T) *testLogger {
 	return &testLogger{tl: t}
 }
 
+func (self *testLogger) Flush() {
+}
+
 func (self *testLogger) Output(depth int, s string) {
 	self.tl.Log(s)
 }
