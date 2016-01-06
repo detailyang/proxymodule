@@ -2,7 +2,6 @@ package common
 
 import (
 	"fmt"
-	"github.com/absolute8511/glog"
 	"sync/atomic"
 )
 
@@ -10,21 +9,6 @@ type Logger interface {
 	Output(depth int, s string)
 	OutputErr(depth int, s string)
 	Flush()
-}
-
-type GLogger struct {
-}
-
-func (l *GLogger) Output(depth int, s string) {
-	glog.InfoDepth(depth, s)
-}
-
-func (l *GLogger) OutputErr(depth int, s string) {
-	glog.ErrorDepth(depth, s)
-}
-
-func (l *GLogger) Flush() {
-	glog.Flush()
 }
 
 type LevelLogger struct {

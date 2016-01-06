@@ -336,7 +336,7 @@ func testRedisHashArray(ay []interface{}, checkValues ...int) error {
 			d, _ := strconv.Atoi(vstr)
 
 			if d != checkValues[i] {
-				return fmt.Errorf("invalid data %d %s != %d", i, v, checkValues[i])
+				return fmt.Errorf("invalid data %d %s != %d", i, vstr, checkValues[i])
 			}
 		}
 	}

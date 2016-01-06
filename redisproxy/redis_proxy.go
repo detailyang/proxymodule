@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-var redisLog = common.NewLevelLogger(1, &common.GLogger{})
+var redisLog = common.NewLevelLogger(1, nil)
 
 type RedisProxyModule interface {
 	RegisterCmd(*CmdRouter)
