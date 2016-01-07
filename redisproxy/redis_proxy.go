@@ -86,7 +86,12 @@ func (self *RedisProxy) Start() {
 			self.l, err = self.grace.Listen("tcp", self.laddr)
 		}
 	} else {
-		self.l, err = net.Listen("tcp", self.laddr)
+		if strings.HasPrefix(self.laddr, "unix://") {
+			unixpath := self.laddr[len("unix://"):]
+			self.l, err = net.Listen("unix", unixpath)
+		} else {
+			self.l, err = net.Listen("tcp", self.laddr)
+		}
 	}
 	if err != nil {
 		redisLog.Errorf("err: %v", err)
