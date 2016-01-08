@@ -84,6 +84,7 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("get", wrapParserRedisKey(self.getCommand))
 	router.Register("set", wrapParserRedisKey(self.setCommand))
+	router.Register("setex", wrapParserRedisKey(self.setexCommand))
 	router.Register("exists", wrapParserRedisKey(self.existsCommand))
 	router.Register("mget", wrapParserRedisKey(self.mgetCommand))
 	router.Register("expire", wrapParserRedisKey(self.expireCommand))

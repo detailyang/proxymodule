@@ -61,6 +61,29 @@ func (self *AerospikeRedisProxy) setCommand(c *Client, key *as.Key, w ResponseWr
 	return nil
 }
 
+func (self *AerospikeRedisProxy) setexCommand(c *Client, key *as.Key, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 3 {
+		return ErrCmdParams
+	}
+
+	duration, err := strconv.Atoi(string(args[1]))
+	if err != nil {
+		return ErrFieldValue
+	}
+
+	policy := *self.asClient.DefaultWritePolicy
+	policy.Expiration = uint32(duration)
+	bin := as.NewBin(singleBinName, args[2])
+	if err := self.asClient.PutBins(&policy, key, bin); err != nil {
+		return err
+	} else {
+		w.WriteString("OK")
+	}
+
+	return nil
+}
+
 func (self *AerospikeRedisProxy) existsCommand(c *Client, key *as.Key, w ResponseWriter) error {
 	if len(c.Args) != 1 {
 		return ErrCmdParams
