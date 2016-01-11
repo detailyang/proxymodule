@@ -78,7 +78,7 @@ func (c *Client) perform() {
 	} else if c.authEnabled() && !c.isAuthed && c.cmd != "auth" {
 		err = ErrNotAuthenticated
 	} else {
-		redisLog.Infof("redis command: %v with params: %v", string(c.cmd), c.Args)
+		//redisLog.Infof("redis command: %v with params: %v", string(c.cmd), c.Args)
 		err = exeCmd(c, c.resp)
 	}
 
