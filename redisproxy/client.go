@@ -82,8 +82,8 @@ func (c *Client) perform() {
 		err = exeCmd(c, c.resp)
 	}
 
-	if redisLog.Level() > 1 {
-		duration := time.Since(start)
+	duration := time.Since(start)
+	if redisLog.Level() > 1 || duration > time.Millisecond*100 {
 
 		fullCmd := c.catGenericCommand()
 		cost := duration.Nanoseconds() / 1000000
