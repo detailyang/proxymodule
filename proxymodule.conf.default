@@ -1,3 +1,8 @@
+{
+"PidFile":"./run.pid",
+"GlogDir":"./glog",
+"ModuleLogLevel":1,
+"ProxyConfList":
 [
 {
     "ModuleName":"redis2aerospike",
@@ -6,3 +11,4 @@
     "ModuleConfPath":"aerospike.module.conf"
 }
 ]
+}
