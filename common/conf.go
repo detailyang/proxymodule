@@ -35,8 +35,8 @@ func LoadProxyModuleConfFromFile(confPath string) (ProxyModuleConf, error) {
 		return c, nil
 	}
 	err = json.Unmarshal(bytes, &c)
-	for _, e := range c.ProxyConfList {
-		e.ModuleConfPath = filepath.Join(confPath, e.ModuleConfPath)
+	for i := range c.ProxyConfList {
+		c.ProxyConfList[i].ModuleConfPath = filepath.Join(confPath, c.ProxyConfList[i].ModuleConfPath)
 	}
 	return c, err
 }
@@ -49,8 +49,8 @@ func LoadProxyModuleConfFromServer(serverKey string) (ProxyModuleConf, error) {
 	if err != nil {
 		return c, err
 	}
-	for _, e := range c.ProxyConfList {
-		e.ModuleConfPath = serverKey + "_module_conf/" + e.ModuleConfPath
+	for i := range c.ProxyConfList {
+		c.ProxyConfList[i].ModuleConfPath = serverKey + "_module_conf/" + c.ProxyConfList[i].ModuleConfPath
 	}
 	return c, err
 }
