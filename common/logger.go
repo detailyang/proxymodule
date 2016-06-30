@@ -40,6 +40,13 @@ func (self *LevelLogger) Infof(f string, args ...interface{}) {
 	}
 }
 
+// used only for wrap call (for other logger interface)
+func (self *LevelLogger) Printf(f string, args ...interface{}) {
+	if self.Logger != nil {
+		self.Logger.Output(3, fmt.Sprintf(f, args...))
+	}
+}
+
 func (self *LevelLogger) Infoln(f string) {
 	if self.Logger != nil && self.level > 0 {
 		self.Logger.Output(2, f)

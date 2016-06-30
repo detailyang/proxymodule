@@ -66,6 +66,7 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 		port, _ := strconv.Atoi(portStr)
 		hosts[i] = as.NewHost(h, port)
 	}
+	logger.Logger.SetLogger(redisLog)
 	if redisLog.Level() > 1 {
 		logger.Logger.SetLevel(logger.INFO)
 	} else {
