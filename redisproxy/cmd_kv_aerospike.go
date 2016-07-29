@@ -2,8 +2,9 @@ package redisproxy
 
 import (
 	"encoding/json"
-	as "github.com/aerospike/aerospike-client-go"
 	"strconv"
+
+	as "github.com/aerospike/aerospike-client-go"
 )
 
 const (
@@ -42,6 +43,30 @@ func (self *AerospikeRedisProxy) getCommand(c *Client, key *as.Key, w ResponseWr
 			writeSingleRecord(w, v.Bins)
 		}
 	}
+	return nil
+}
+
+func (self *AerospikeRedisProxy) delCommand(c *Client, key *as.Key, w ResponseWriter) error {
+	keys := make([]*as.Key, 0, len(c.Args))
+	keys = append(keys, key)
+	for i := 1; i < len(c.Args); i++ {
+		k, err := parserRedisKey(string(c.Args[i]))
+		if err != nil {
+			return err
+		}
+		keys = append(keys, k)
+	}
+
+	var deleted int64
+	for _, key := range keys {
+		if v, err := self.asClient.Delete(nil, key); err != nil {
+			redisLog.Debugf("delete key failed, error:%v", key)
+		} else if v {
+			deleted++
+		}
+	}
+	w.WriteInteger(deleted)
+
 	return nil
 }
 

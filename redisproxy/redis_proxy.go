@@ -1,11 +1,12 @@
 package redisproxy
 
 import (
-	"github.com/absolute8511/grace/gracenet"
-	"github.com/absolute8511/proxymodule/common"
 	"net"
 	"strings"
 	"sync"
+
+	"github.com/absolute8511/grace/gracenet"
+	"github.com/absolute8511/proxymodule/common"
 )
 
 var redisLog = common.NewLevelLogger(1, nil)
