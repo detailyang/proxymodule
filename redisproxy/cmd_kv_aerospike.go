@@ -65,7 +65,7 @@ func (self *AerospikeRedisProxy) delCommand(c *Client, key *as.Key, w ResponseWr
 	var deleted int64
 	for _, key := range keys {
 		if err := self.asClient.Touch(&touchPolicy, key); err != nil {
-			redisLog.Debugf("delete key failed, error:%v", key)
+			redisLog.Debugf("delete key:%v failed, error:%v", key, err.Error())
 		} else {
 			deleted++
 		}
