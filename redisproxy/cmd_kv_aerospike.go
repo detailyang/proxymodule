@@ -70,7 +70,7 @@ func (self *AerospikeRedisProxy) delCommand(c *Client, key *as.Key, w ResponseWr
 
 	delPolicy := *self.asClient.DefaultWritePolicy
 	for _, key := range keys {
-		if err := self.asClient.Delete(&delPolicy, key); err != nil {
+		if _, err := self.asClient.Delete(&delPolicy, key); err != nil {
 			redisLog.Debugf("delCommand delete key:%v failed, error:%s", key, err.Error())
 		}
 	}
