@@ -3,7 +3,6 @@ package redisproxy
 import (
 	"encoding/json"
 	"strconv"
-	"time"
 
 	as "github.com/aerospike/aerospike-client-go"
 )
@@ -47,7 +46,6 @@ func (self *AerospikeRedisProxy) getCommand(c *Client, key *as.Key, w ResponseWr
 	return nil
 }
 
-//use ttl to simulate delete
 func (self *AerospikeRedisProxy) delCommand(c *Client, key *as.Key, w ResponseWriter) error {
 	keys := make([]*as.Key, 0, len(c.Args))
 	keys = append(keys, key)
@@ -61,17 +59,22 @@ func (self *AerospikeRedisProxy) delCommand(c *Client, key *as.Key, w ResponseWr
 
 	touchPolicy := *self.asClient.DefaultWritePolicy
 	touchPolicy.Expiration = 1
-
 	var deleted int64
 	for _, key := range keys {
 		if err := self.asClient.Touch(&touchPolicy, key); err != nil {
-			redisLog.Debugf("delete key:%v failed, error:%v", key, err.Error())
+			redisLog.Debugf("delCommand expire key:%v failed, error:%s", key, err.Error())
 		} else {
 			deleted++
 		}
 	}
 
-	time.Sleep(1 * time.Second)
+	delPolicy := *self.asClient.DefaultWritePolicy
+	for _, key := range keys {
+		if err := self.asClient.Delete(&delPolicy, key); err != nil {
+			redisLog.Debugf("delCommand delete key:%v failed, error:%s", key, err.Error())
+		}
+	}
+
 	w.WriteInteger(deleted)
 
 	return nil
