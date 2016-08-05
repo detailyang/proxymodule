@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	testProxyAddr = "127.0.0.1:18818"
+	testProxyAddr     = "127.0.0.1:18818"
+	testProxyAddrConn = "192.168.66.202:6666"
 )
 
 type testLogger struct {
@@ -53,7 +54,7 @@ func startTestRedisProxy(t *testing.T) *RedisProxy {
 
 func getTestConn(t *testing.T) *goredis.PoolConn {
 	time.Sleep(time.Second * 3)
-	testClient := goredis.NewClient(testProxyAddr, "")
+	testClient := goredis.NewClient(testProxyAddrConn, "")
 	testClient.SetMaxIdleConns(2)
 	conn, err := testClient.Get()
 	if err != nil {
@@ -172,6 +173,7 @@ func TestRedisKVM(t *testing.T) {
 		t.Fatal(ok)
 	}
 
+	start := time.Now()
 	if v, err := goredis.MultiBulk(c.Do("mget", asKeyPrefix+"a", asKeyPrefix+"b", asKeyPrefix+"c")); err != nil {
 		t.Fatal(err)
 	} else if len(v) != 3 {
@@ -188,6 +190,7 @@ func TestRedisKVM(t *testing.T) {
 		if v[2] != nil {
 			t.Fatal("must nil")
 		}
+		t.Logf("cost %v", time.Since(start))
 	}
 }
 
@@ -311,6 +314,55 @@ func TestRedisHash(t *testing.T) {
 		t.Fatal(n)
 	}
 
+}
+
+func testRedisHashArrayPair(ay []interface{}, checkValues ...int) error {
+	if len(ay) != len(checkValues) {
+		return fmt.Errorf("invalid return number %d != %d", len(ay), len(checkValues))
+	}
+	if len(ay)%2 != 0 {
+		return fmt.Errorf("invalid return number, should be pair : %v", len(ay))
+	}
+	// the get all return may be out of ordered in (field value) pair, so we need to check by field map.
+	mapValues := make(map[int]int)
+	for index, v := range checkValues {
+		mapValues[index] = v
+	}
+
+	for i := 0; i < len(ay)/2; i = i + 2 {
+		if ay[i] == nil && checkValues[i] != 0 {
+			return fmt.Errorf("must nil")
+		} else if ay[i] != nil {
+			field, ok := ay[i].([]byte)
+			var vstr string
+			if !ok {
+				vstr, ok = ay[i].(string)
+				if !ok {
+					return fmt.Errorf("invalid return data %d %v :%T", i, ay[i], ay[i])
+				}
+			} else {
+				vstr = string(field)
+			}
+
+			fieldV, _ := strconv.Atoi(vstr)
+			v, ok := ay[i+1].([]byte)
+			if !ok {
+				vstr, ok = ay[i+1].(string)
+				if !ok {
+					return fmt.Errorf("invalid return data %d %v :%T", i+1, ay[i+1], ay[i+1])
+				}
+			} else {
+				vstr = string(v)
+			}
+
+			d, _ := strconv.Atoi(vstr)
+
+			if d != checkValues[fieldV] {
+				return fmt.Errorf("invalid data %d %s != %d", d, vstr, checkValues[fieldV])
+			}
+		}
+	}
+	return nil
 }
 
 func testRedisHashArray(ay []interface{}, checkValues ...int) error {
@@ -445,7 +497,7 @@ func TestRedisHashGetAll(t *testing.T) {
 	if v, err := goredis.MultiBulk(c.Do("hgetall", key)); err != nil {
 		t.Fatal(err)
 	} else {
-		if err := testRedisHashArray(v, 1, 1, 2, 2, 3, 3); err != nil {
+		if err := testRedisHashArrayPair(v, 1, 1, 2, 2, 3, 3); err != nil {
 			t.Fatal(err)
 		}
 	}
