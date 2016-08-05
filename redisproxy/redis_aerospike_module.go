@@ -2,13 +2,14 @@ package redisproxy
 
 import (
 	"errors"
-	as "github.com/aerospike/aerospike-client-go"
-	"github.com/aerospike/aerospike-client-go/logger"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	as "github.com/aerospike/aerospike-client-go"
+	"github.com/aerospike/aerospike-client-go/logger"
 )
 
 var (
@@ -84,6 +85,7 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 
 func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("get", wrapParserRedisKey(self.getCommand))
+	router.Register("del", wrapParserRedisKey(self.delCommand))
 	router.Register("set", wrapParserRedisKey(self.setCommand))
 	router.Register("setex", wrapParserRedisKey(self.setexCommand))
 	router.Register("exists", wrapParserRedisKey(self.existsCommand))
