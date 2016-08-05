@@ -39,6 +39,9 @@ func (self *AerospikeRedisProxy) getCommand(c *Client, key *as.Key, w ResponseWr
 		if v == nil {
 			w.WriteBulk(nil)
 		} else {
+			if redisLog.Level() > 2 {
+				redisLog.Debugf("get %v, %v", v.Key.String(), v.Bins)
+			}
 			writeSingleRecord(w, v.Bins)
 		}
 	}
@@ -132,11 +135,16 @@ func (self *AerospikeRedisProxy) mgetCommand(c *Client, key *as.Key, w ResponseW
 				} else {
 					jsondata, _ = json.Marshal(r.Bins)
 				}
-				redisLog.Debugf("batch get %v, %v, %v", r.Key.String(), r.Bins, string(jsondata))
+				if redisLog.Level() > 2 {
+					redisLog.Debugf("batch get %v, %v, %v", r.Key.String(), r.Bins, string(jsondata))
+				}
 				varry[i] = jsondata
 			}
 		}
 		w.WriteSliceArray(varry)
+		if redisLog.Level() > 2 {
+			redisLog.Debugf("batch get write response done")
+		}
 	}
 
 	return nil
