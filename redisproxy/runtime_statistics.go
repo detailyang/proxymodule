@@ -47,7 +47,7 @@ func (self *ProxyRunTimeStatistics) GenInfoBytes() []byte {
 		for unit, count := range data {
 			sum += count
 			buffer.WriteString(fmt.Sprintf("%s %s,%s:%d\r\n",
-				cmd, unit.set, unit.namespace, count))
+				cmd, unit.namespace, unit.set, count))
 		}
 		buffer.WriteString(fmt.Sprintf("%s:%d\r\n", cmd, sum))
 		total += sum
@@ -62,7 +62,7 @@ func (self *ProxyRunTimeStatistics) GenInfoBytes() []byte {
 	buffer.WriteString(fmt.Sprintf("slow operation:%d\r\n",
 		atomic.LoadUint64(&self.slowOperation)))
 
-	buffer.WriteString(fmt.Sprintf("accumulated time:%dms\r\n",
+	buffer.WriteString(fmt.Sprintf("accumulated time:%dus\r\n",
 		atomic.LoadInt64(&self.accumulatedOpTime)))
 
 	return buffer.Bytes()
