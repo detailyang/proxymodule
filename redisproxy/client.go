@@ -83,10 +83,11 @@ func (c *Client) perform() {
 	}
 
 	duration := time.Since(start)
+	cost := duration.Nanoseconds() / 1000000
+
 	if redisLog.Level() > 1 || duration > time.Millisecond*100 {
 
 		fullCmd := c.catGenericCommand()
-		cost := duration.Nanoseconds() / 1000000
 
 		truncateLen := len(fullCmd)
 		if truncateLen > 256 {
@@ -97,7 +98,14 @@ func (c *Client) perform() {
 			string(fullCmd[:truncateLen]), err)
 	}
 
+	if duration > time.Millisecond*100 {
+		gProxyRunTimeStatistics.IncrSlowOperation()
+	}
+
+	gProxyRunTimeStatistics.IncrOpTime(cost)
+
 	if err != nil {
+		gProxyRunTimeStatistics.IncrFailedOperation()
 		c.resp.WriteError(err)
 	}
 	c.resp.Flush()
