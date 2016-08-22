@@ -89,6 +89,7 @@ func (self *AerospikeRedisProxy) setCommand(c *Client, key *as.Key, w ResponseWr
 		return ErrCmdParams
 	}
 
+	// TODO: set should never expire
 	bin := as.NewBin(singleBinName, args[1])
 	if err := self.asClient.PutBins(nil, key, bin); err != nil {
 		return err
