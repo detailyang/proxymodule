@@ -101,6 +101,7 @@ func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("hset", wrapParserRedisKeyAndField(self.hsetCommand))
 	router.Register("hdel", wrapParserRedisKeyAndField(self.hdelCommand))
 	router.Register("hexists", wrapParserRedisKeyAndField(self.hexistsCommand))
+	router.Register("info", self.infoCommand)
 }
 
 func parserRedisKey(key string) (*as.Key, error) {
@@ -147,6 +148,16 @@ func wrapParserRedisKey(f AsCommandFunc) CommandFunc {
 		if err != nil {
 			return err
 		}
+
+		var ArgEx [][]byte
+		if len(c.Args) > 1 {
+			ArgEx = c.Args[1:]
+		} else {
+			ArgEx = nil
+		}
+
+		gProxyRunTimeStatistics.Statistic(c.cmd, k, ArgEx)
+
 		return f(c, k, w)
 	}
 }
@@ -160,6 +171,9 @@ func wrapParserRedisKeyAndField(f AsCommandFuncWithBins) CommandFunc {
 		if err != nil {
 			return err
 		}
+
+		gProxyRunTimeStatistics.Statistic(c.cmd, k, nil)
+
 		return f(c, k, fields, w)
 	}
 }
