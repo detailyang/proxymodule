@@ -12,7 +12,8 @@ import (
 
 const (
 	testProxyAddr     = "127.0.0.1:18818"
-	testProxyAddrConn = "192.168.66.202:6666"
+	testProxyAddrConn = "127.0.0.1:18818"
+	testKVRemoteAddr  = "127.0.0.1:3000"
 )
 
 type testLogger struct {
@@ -37,7 +38,7 @@ func (self *testLogger) OutputErr(depth int, s string) {
 func startTestRedisProxy(t *testing.T) *RedisProxy {
 	redisLog.Logger = newTestLogger(t)
 	configFile := "/tmp/redis-proxy-module-test.conf"
-	conf := &AerospikeRedisConf{[]string{"192.168.66.202:3000"}, 10}
+	conf := &AerospikeRedisConf{[]string{testKVRemoteAddr}, 10}
 	d, _ := json.Marshal(conf)
 	err := ioutil.WriteFile(configFile, d, 0666)
 	if err != nil {

@@ -89,7 +89,7 @@ func (self *AerospikeRedisProxy) setCommand(c *Client, key *as.Key, w ResponseWr
 		return ErrCmdParams
 	}
 
-	// TODO: set should never expire
+	// set should never expire, default write policy no expire
 	bin := as.NewBin(singleBinName, args[1])
 	if err := self.asClient.PutBins(nil, key, bin); err != nil {
 		return err
@@ -109,6 +109,9 @@ func (self *AerospikeRedisProxy) setexCommand(c *Client, key *as.Key, w Response
 	duration, err := strconv.Atoi(string(args[1]))
 	if err != nil {
 		return ErrFieldValue
+	}
+	if duration < 1 {
+		return ErrCmdParams
 	}
 
 	policy := *self.asClient.DefaultWritePolicy
@@ -195,6 +198,9 @@ func (self *AerospikeRedisProxy) expireCommand(c *Client, key *as.Key, w Respons
 	duration, err := strconv.Atoi(string(args[1]))
 	if err != nil {
 		return ErrFieldValue
+	}
+	if duration < 1 {
+		return ErrCmdParams
 	}
 
 	touchPolicy := *self.asClient.DefaultWritePolicy

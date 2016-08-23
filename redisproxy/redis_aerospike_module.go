@@ -2,6 +2,7 @@ package redisproxy
 
 import (
 	"errors"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -80,6 +81,7 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	}
 	self.asClient.DefaultPolicy.Timeout = time.Second * time.Duration(int64(self.conf.Timeout))
 	self.asClient.DefaultWritePolicy.SendKey = true
+	self.asClient.DefaultWritePolicy.Expiration = math.MaxUint32
 	return nil
 }
 
