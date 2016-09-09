@@ -26,14 +26,16 @@ type AerospikeRedisConf struct {
 
 type AerospikeRedisProxy struct {
 	sync.RWMutex
-	asClient  *as.Client
-	asServers []string
-	conf      *AerospikeRedisConf
+	asClient        *as.Client
+	asServers       []string
+	conf            *AerospikeRedisConf
+	proxyStatistics *AerospikeProxyStatistics
 }
 
 func CreateRedis2AerospikeProxy() RedisProxyModule {
 	return &AerospikeRedisProxy{
-		asServers: make([]string, 0),
+		asServers:       make([]string, 0),
+		proxyStatistics: NewAerospikeProxyStatistics(),
 	}
 }
 
@@ -85,22 +87,65 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	return nil
 }
 
+func (self *AerospikeRedisProxy) GetStatisticsModule() ProxyStatisticsModule {
+	return self.proxyStatistics
+}
+
+func (self *AerospikeRedisProxy) wrapParserRedisKey(f AsCommandFunc) CommandFunc {
+	return func(c *Client, w ResponseWriter) error {
+		if len(c.Args) == 0 {
+			return ErrCmdParams
+		}
+		k, err := parserRedisKey(string(c.Args[0]))
+		if err != nil {
+			return err
+		}
+
+		var ArgEx [][]byte
+		if len(c.Args) > 1 {
+			ArgEx = c.Args[1:]
+		} else {
+			ArgEx = nil
+		}
+
+		self.proxyStatistics.Statistic(c.cmd, k, ArgEx)
+
+		return f(c, k, w)
+	}
+}
+
+func (self *AerospikeRedisProxy) wrapParserRedisKeyAndField(f AsCommandFuncWithBins) CommandFunc {
+	return func(c *Client, w ResponseWriter) error {
+		if len(c.Args) == 0 {
+			return ErrCmdParams
+		}
+		k, fields, err := parserRedisKeyAndFields(c.Args)
+		if err != nil {
+			return err
+		}
+
+		self.proxyStatistics.Statistic(c.cmd, k, nil)
+
+		return f(c, k, fields, w)
+	}
+}
+
 func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
-	router.Register("get", wrapParserRedisKey(self.getCommand))
-	router.Register("del", wrapParserRedisKey(self.delCommand))
-	router.Register("set", wrapParserRedisKey(self.setCommand))
-	router.Register("setex", wrapParserRedisKey(self.setexCommand))
-	router.Register("exists", wrapParserRedisKey(self.existsCommand))
-	router.Register("mget", wrapParserRedisKey(self.mgetCommand))
-	router.Register("expire", wrapParserRedisKey(self.expireCommand))
-	router.Register("ttl", wrapParserRedisKey(self.ttlCommand))
-	router.Register("hget", wrapParserRedisKeyAndField(self.hgetCommand))
-	router.Register("hgetall", wrapParserRedisKeyAndField(self.hgetallCommand))
-	router.Register("hmget", wrapParserRedisKeyAndField(self.hmgetCommand))
-	router.Register("hmset", wrapParserRedisKeyAndField(self.hmsetCommand))
-	router.Register("hset", wrapParserRedisKeyAndField(self.hsetCommand))
-	router.Register("hdel", wrapParserRedisKeyAndField(self.hdelCommand))
-	router.Register("hexists", wrapParserRedisKeyAndField(self.hexistsCommand))
+	router.Register("get", self.wrapParserRedisKey(self.getCommand))
+	router.Register("del", self.wrapParserRedisKey(self.delCommand))
+	router.Register("set", self.wrapParserRedisKey(self.setCommand))
+	router.Register("setex", self.wrapParserRedisKey(self.setexCommand))
+	router.Register("exists", self.wrapParserRedisKey(self.existsCommand))
+	router.Register("mget", self.wrapParserRedisKey(self.mgetCommand))
+	router.Register("expire", self.wrapParserRedisKey(self.expireCommand))
+	router.Register("ttl", self.wrapParserRedisKey(self.ttlCommand))
+	router.Register("hget", self.wrapParserRedisKeyAndField(self.hgetCommand))
+	router.Register("hgetall", self.wrapParserRedisKeyAndField(self.hgetallCommand))
+	router.Register("hmget", self.wrapParserRedisKeyAndField(self.hmgetCommand))
+	router.Register("hmset", self.wrapParserRedisKeyAndField(self.hmsetCommand))
+	router.Register("hset", self.wrapParserRedisKeyAndField(self.hsetCommand))
+	router.Register("hdel", self.wrapParserRedisKeyAndField(self.hdelCommand))
+	router.Register("hexists", self.wrapParserRedisKeyAndField(self.hexistsCommand))
 	router.Register("info", self.infoCommand)
 }
 
@@ -138,42 +183,3 @@ func parserRedisKeyAndFields(args [][]byte) (*as.Key, []*as.Bin, error) {
 
 type AsCommandFunc func(c *Client, k *as.Key, w ResponseWriter) error
 type AsCommandFuncWithBins func(c *Client, k *as.Key, bins []*as.Bin, w ResponseWriter) error
-
-func wrapParserRedisKey(f AsCommandFunc) CommandFunc {
-	return func(c *Client, w ResponseWriter) error {
-		if len(c.Args) == 0 {
-			return ErrCmdParams
-		}
-		k, err := parserRedisKey(string(c.Args[0]))
-		if err != nil {
-			return err
-		}
-
-		var ArgEx [][]byte
-		if len(c.Args) > 1 {
-			ArgEx = c.Args[1:]
-		} else {
-			ArgEx = nil
-		}
-
-		gProxyRunTimeStatistics.Statistic(c.cmd, k, ArgEx)
-
-		return f(c, k, w)
-	}
-}
-
-func wrapParserRedisKeyAndField(f AsCommandFuncWithBins) CommandFunc {
-	return func(c *Client, w ResponseWriter) error {
-		if len(c.Args) == 0 {
-			return ErrCmdParams
-		}
-		k, fields, err := parserRedisKeyAndFields(c.Args)
-		if err != nil {
-			return err
-		}
-
-		gProxyRunTimeStatistics.Statistic(c.cmd, k, nil)
-
-		return f(c, k, fields, w)
-	}
-}

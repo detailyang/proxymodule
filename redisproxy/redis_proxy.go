@@ -11,11 +11,19 @@ import (
 
 var redisLog = common.NewLevelLogger(1, nil)
 
+type ProxyStatisticsModule interface {
+	IncrSlowOperation()
+	IncrFailedOperation()
+	IncrOpTime(int64)
+	GenMonitorData() []byte
+}
+
 type RedisProxyModule interface {
 	RegisterCmd(*CmdRouter)
 	InitConf(func(v interface{}) error) error
 	Stop()
 	GetProxyName() string
+	GetStatisticsModule() ProxyStatisticsModule
 }
 
 type RedisProxyModuleCreateFunc func() RedisProxyModule
@@ -125,11 +133,21 @@ func (self *RedisProxy) ServeRedis() {
 		client := pool.Get().(*RespClient)
 		client.Reset(conn)
 		client.RegCmds = self.router
+		client.proxyStatistics = self.proxyModule.GetStatisticsModule()
+
 		self.wg.Add(1)
 		go func() {
 			defer self.wg.Done()
 			client.Run()
 			pool.Put(client)
 		}()
+	}
+}
+
+func (self *RedisProxy) ProxyStatisticsData() []byte {
+	if statisticsModule := self.proxyModule.GetStatisticsModule(); statisticsModule != nil {
+		return statisticsModule.GenMonitorData()
+	} else {
+		return nil
 	}
 }

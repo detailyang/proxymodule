@@ -43,6 +43,8 @@ type Client struct {
 
 	resp ResponseWriter
 	buf  bytes.Buffer
+
+	proxyStatistics ProxyStatisticsModule
 }
 
 func newClient() *Client {
@@ -99,15 +101,26 @@ func (c *Client) perform() {
 			string(fullCmd[:truncateLen]), err)
 	}
 
-	if duration > time.Millisecond*20 {
-		gProxyRunTimeStatistics.IncrSlowOperation()
+	if c.proxyStatistics != nil {
+		if duration > time.Millisecond*20 {
+			c.proxyStatistics.IncrSlowOperation()
+		}
+		c.proxyStatistics.IncrOpTime(duration.Nanoseconds() / 1000)
 	}
 
-	gProxyRunTimeStatistics.IncrOpTime(duration.Nanoseconds() / 1000)
-
 	if err != nil {
-		gProxyRunTimeStatistics.IncrFailedOperation()
+		if c.proxyStatistics != nil {
+			c.proxyStatistics.IncrFailedOperation()
+		}
 		c.resp.WriteError(err)
+
+		fullCmd := c.catGenericCommand()
+		truncateLen := len(fullCmd)
+		if truncateLen > 256 {
+			truncateLen = 256
+		}
+
+		redisLog.Infof("command execute failed, detail: %s, err: %s", string(fullCmd[:truncateLen]), err.Error())
 	}
 	c.resp.Flush()
 	return

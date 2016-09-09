@@ -236,7 +236,7 @@ func (self *AerospikeRedisProxy) ttlCommand(c *Client, key *as.Key, w ResponseWr
 }
 
 func (self *AerospikeRedisProxy) infoCommand(c *Client, w ResponseWriter) error {
-	w.WriteBulk(gProxyRunTimeStatistics.GenInfoBytes())
+	w.WriteBulk(self.proxyStatistics.GenInfoBytes())
 	return nil
 }
 

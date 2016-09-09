@@ -2,23 +2,40 @@ package redisproxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	as "github.com/aerospike/aerospike-client-go"
 )
 
-var gProxyRunTimeStatistics *ProxyRunTimeStatistics
+const (
+	monitorBinuess     = "tether.kvproxy"
+	monitorApplication = "kvstore"
+	monitorCategory    = "category"
+)
+
+var (
+	hostName = "unknown host"
+)
 
 func init() {
-	gProxyRunTimeStatistics = newProxyRunTimeStatistics()
+	if name, err := os.Hostname(); err == nil {
+		hostName = name
+	}
 }
 
-func newProxyRunTimeStatistics() *ProxyRunTimeStatistics {
-	return &ProxyRunTimeStatistics{
+func NewAerospikeProxyStatistics() *AerospikeProxyStatistics {
+	statisticsModule := &AerospikeProxyStatistics{
 		statisticsData: make(map[string]map[statisticsUnit]uint64),
 	}
+
+	statisticsModule.genMonitorData = wrapGenMonitorData(statisticsModule)
+
+	return statisticsModule
 }
 
 type statisticsUnit struct {
@@ -26,16 +43,18 @@ type statisticsUnit struct {
 	set       string
 }
 
-type ProxyRunTimeStatistics struct {
+type AerospikeProxyStatistics struct {
 	sync.Mutex
 	statisticsData map[string]map[statisticsUnit]uint64
 
 	accumulatedOpTime int64
 	failedOperation   uint64
 	slowOperation     uint64
+
+	genMonitorData func() []byte
 }
 
-func (self *ProxyRunTimeStatistics) GenInfoBytes() []byte {
+func (self *AerospikeProxyStatistics) GenInfoBytes() []byte {
 	var buffer bytes.Buffer
 	var total uint64
 
@@ -68,19 +87,19 @@ func (self *ProxyRunTimeStatistics) GenInfoBytes() []byte {
 	return buffer.Bytes()
 }
 
-func (self *ProxyRunTimeStatistics) IncrFailedOperation() {
+func (self *AerospikeProxyStatistics) IncrFailedOperation() {
 	atomic.AddUint64(&self.failedOperation, 1)
 }
 
-func (self *ProxyRunTimeStatistics) IncrSlowOperation() {
+func (self *AerospikeProxyStatistics) IncrSlowOperation() {
 	atomic.AddUint64(&self.slowOperation, 1)
 }
 
-func (self *ProxyRunTimeStatistics) IncrOpTime(duration int64) {
+func (self *AerospikeProxyStatistics) IncrOpTime(duration int64) {
 	atomic.AddInt64(&self.accumulatedOpTime, duration)
 }
 
-func (self *ProxyRunTimeStatistics) Statistic(Cmd string, key *as.Key, args [][]byte) {
+func (self *AerospikeProxyStatistics) Statistic(Cmd string, key *as.Key, args [][]byte) {
 	self.Mutex.Lock()
 	defer self.Mutex.Unlock()
 
@@ -101,7 +120,6 @@ func (self *ProxyRunTimeStatistics) Statistic(Cmd string, key *as.Key, args [][]
 					namespace: keyEx.Namespace(),
 					set:       keyEx.SetName(),
 				})
-
 			}
 		}
 	}
@@ -118,4 +136,170 @@ func (self *ProxyRunTimeStatistics) Statistic(Cmd string, key *as.Key, args [][]
 			self.statisticsData[Cmd][unit] = 1
 		}
 	}
+}
+
+func (self *AerospikeProxyStatistics) GenMonitorData() []byte {
+	return self.genMonitorData()
+}
+
+/*
+the monitor data format:
+  [
+  {
+	  "business":"tether.kvproxy",
+	  "timestamp":1456387601,
+	  "metrics":{
+		  "get":78219,
+		  "set":21763,
+		  "del":21625
+	  },
+	  "tags":{
+		  "application":"kvstore",
+		  "host":"",
+		  "category":"",
+	  },
+  }
+  ]
+*/
+
+type monitorData struct {
+	Business  string            `json:"business"`
+	Timestamp int64             `json:"timestamp"`
+	Metrics   map[string]uint64 `json:"metrics"`
+	Tags      map[string]string `json:"tags"`
+}
+
+func newMonitorData() *monitorData {
+	data := &monitorData{
+		Metrics: make(map[string]uint64),
+		Tags:    make(map[string]string),
+	}
+
+	data.Tags["application"] = monitorApplication
+	data.Tags["host"] = hostName
+	return data
+}
+
+/*
+current metrics command:
+get, del, ttl, exists, mget, set ,setex, expire
+*/
+func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
+
+	supportedCommands := []string{
+		"get", "del", "set", "setex", "exists", "mget", "expire",
+		"ttl", "hget", "hgetall", "hmget", "hmset", "hset", "hdel", "hexists",
+		"info"}
+
+	metricsCmd := map[string]struct{}{
+		"get":    struct{}{},
+		"del":    struct{}{},
+		"ttl":    struct{}{},
+		"exists": struct{}{},
+		"mget":   struct{}{},
+		"set":    struct{}{},
+		"setex":  struct{}{},
+		"expire": struct{}{},
+	}
+
+	snapshot := struct {
+		statisticsData    map[string]map[statisticsUnit]uint64
+		accumulatedOpTime int64
+		failedOperation   uint64
+		slowOperation     uint64
+	}{
+		make(map[string]map[statisticsUnit]uint64),
+		0, 0, 0,
+	}
+
+	rawMonitorData := make(map[string]map[statisticsUnit]uint64)
+
+	for _, cmd := range supportedCommands {
+		snapshot.statisticsData[cmd] = make(map[statisticsUnit]uint64)
+		rawMonitorData[cmd] = make(map[statisticsUnit]uint64)
+	}
+
+	f = func() []byte {
+
+		failedOperation := atomic.LoadUint64(&proxy.failedOperation)
+		slowOperation := atomic.LoadUint64(&proxy.slowOperation)
+		accumulatedOpTime := atomic.LoadInt64(&proxy.accumulatedOpTime)
+		var total uint64
+
+		proxy.Mutex.Lock()
+		for cmd, data := range proxy.statisticsData {
+			if _, ok := snapshot.statisticsData[cmd]; ok {
+				for unit, count := range data {
+					if _, b := snapshot.statisticsData[cmd][unit]; b {
+						rawMonitorData[cmd][unit] = count - snapshot.statisticsData[cmd][unit]
+					} else {
+						rawMonitorData[cmd][unit] = count
+					}
+					snapshot.statisticsData[cmd][unit] = count
+					total += rawMonitorData[cmd][unit]
+				}
+			} else {
+				redisLog.Errorf("execute unsupported command, %s", cmd)
+			}
+		}
+		proxy.Mutex.Unlock()
+
+		integratedData := make(map[string]map[string]uint64)
+
+		for cmd, rawData := range rawMonitorData {
+			if _, ok := metricsCmd[cmd]; ok {
+				for unit, count := range rawData {
+					category := statisticsUnit2Category(unit)
+					if _, ok := integratedData[category]; ok {
+						integratedData[category][cmd] = count
+					} else {
+						integratedData[category] = make(map[string]uint64)
+						integratedData[category][cmd] = count
+					}
+				}
+			}
+		}
+
+		var proxyMonitorData []*monitorData
+		timestamp := time.Now().Unix()
+
+		for category, metrics := range integratedData {
+			monitorSample := newMonitorData()
+			monitorSample.Tags[monitorCategory] = category
+			monitorSample.Business = monitorBinuess
+			monitorSample.Timestamp = timestamp
+
+			for cmd, count := range metrics {
+				monitorSample.Metrics[cmd] = count
+			}
+			proxyMonitorData = append(proxyMonitorData, monitorSample)
+
+		}
+
+		//the overall monitor data
+		overViewData := newMonitorData()
+		overViewData.Metrics["Failed"] = failedOperation - snapshot.failedOperation
+		snapshot.failedOperation = failedOperation
+		overViewData.Metrics["Slow"] = slowOperation - snapshot.slowOperation
+		snapshot.slowOperation = slowOperation
+		overViewData.Metrics["CostTime"] = uint64(accumulatedOpTime - snapshot.accumulatedOpTime)
+		snapshot.accumulatedOpTime = accumulatedOpTime
+		overViewData.Metrics["Total"] = total
+		overViewData.Tags[monitorCategory] = "OverView"
+		overViewData.Business = monitorBinuess
+		overViewData.Timestamp = timestamp
+		proxyMonitorData = append(proxyMonitorData, overViewData)
+
+		if encodedData, err := json.Marshal(proxyMonitorData); err != nil {
+			return nil
+		} else {
+			return encodedData
+		}
+	}
+
+	return f
+}
+
+func statisticsUnit2Category(unit statisticsUnit) string {
+	return unit.namespace + ":" + unit.set
 }
