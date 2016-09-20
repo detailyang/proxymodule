@@ -10,6 +10,7 @@ import (
 	"github.com/absolute8511/grace/gracenet"
 	"github.com/absolute8511/proxymodule/common"
 	"github.com/absolute8511/proxymodule/redisproxy"
+	"github.com/wangjian-pg/dccproxy"
 )
 
 var proxyModuleLog common.Logger
@@ -31,7 +32,9 @@ func NewProxyModuleMgr(c []common.ProxyConf) *ProxyModuleMgr {
 
 func SetLogger(level int32, l common.Logger) {
 	proxyModuleLog = l
+
 	redisproxy.SetLogger(level, proxyModuleLog)
+	dccproxy.SetLogger(level, proxyModuleLog)
 }
 
 func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
@@ -48,6 +51,14 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 			}
 			go s.Start()
 			self.servers[conf.ModuleName] = s
+		} else if conf.ProxyType == "DCC" {
+			if s, err := dccproxy.NewDccProxy(conf.LocalProxyAddr,
+				conf.ModuleConfPath, grace); err != nil {
+				return err
+			} else {
+				go s.Start()
+				self.servers[conf.ModuleName] = s
+			}
 		} else {
 			return fmt.Errorf("unknown proxy type: %v", conf.ProxyType)
 		}

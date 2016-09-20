@@ -9,6 +9,12 @@
     "ProxyType":"REDIS",
     "LocalProxyAddr":"unix:///tmp/redis2aerospike.sock",
     "ModuleConfPath":"aerospike.module.conf"
+},
+{
+    "ModuleName":"dccproxy",
+    "ProxyType":"DCC",
+    "LocalProxyAddr":"127.0.0.1:8606",
+    "ModuleConfPath":"dccproxy.module.conf"
 }
 ]
 }
