@@ -1,6 +1,7 @@
 package redisproxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"strconv"
 
@@ -236,7 +237,13 @@ func (self *AerospikeRedisProxy) ttlCommand(c *Client, key *as.Key, w ResponseWr
 }
 
 func (self *AerospikeRedisProxy) infoCommand(c *Client, w ResponseWriter) error {
-	w.WriteBulk(self.proxyStatistics.GenInfoBytes())
+	var info bytes.Buffer
+
+	info.Write(self.proxyStatistics.GenInfoBytes())
+	info.WriteString("\r\n")
+	info.Write(self.whiteList.GenInfoBytes())
+
+	w.WriteBulk(info.Bytes())
 	return nil
 }
 

@@ -1,7 +1,9 @@
 package redisproxy
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 
 	as "github.com/aerospike/aerospike-client-go"
@@ -85,6 +87,22 @@ func (self *aerospikeWhiteList) AuthAccess(key *as.Key) bool {
 	} else {
 		return true
 	}
+}
+
+func (self *aerospikeWhiteList) GenInfoBytes() []byte {
+	var info bytes.Buffer
+	info.WriteString("#White List\r\n")
+
+	self.Mutex.Lock()
+	defer self.Mutex.Unlock()
+
+	info.WriteString(fmt.Sprintf("list length:%d\r\n", len(self.whiteList)))
+
+	for set, _ := range self.whiteList {
+		info.WriteString(set + "\r\n")
+	}
+
+	return info.Bytes()
 }
 
 func (self *aerospikeWhiteList) Stop() {
