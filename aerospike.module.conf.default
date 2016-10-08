@@ -1,4 +1,6 @@
 {
     "AerospikeServers":["192.168.66.202:3000"],
+    "DccServers":[""],
+    "WhiteListBackUp":"./whitelist.dat",
     "Timeout":5
 }

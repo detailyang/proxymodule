@@ -17,11 +17,14 @@ var (
 	ErrKeyInvalid = errors.New("Invalid Aerospike Key")
 	ErrCmdParams  = errors.New("command params error")
 	ErrFieldValue = errors.New("Invalid field value")
+	ErrAuthFailed = errors.New("has no auth to access kv servers, please contact the admin")
 )
 
 type AerospikeRedisConf struct {
 	AerospikeServers []string
 	Timeout          int
+	DccServers       []string
+	WhiteListBackUp  string
 }
 
 type AerospikeRedisProxy struct {
@@ -30,6 +33,7 @@ type AerospikeRedisProxy struct {
 	asServers       []string
 	conf            *AerospikeRedisConf
 	proxyStatistics *AerospikeProxyStatistics
+	whiteList       *aerospikeWhiteList
 }
 
 func CreateRedis2AerospikeProxy() RedisProxyModule {
@@ -49,6 +53,7 @@ func (self *AerospikeRedisProxy) GetProxyName() string {
 
 func (self *AerospikeRedisProxy) Stop() {
 	self.asClient.Close()
+	self.whiteList.Stop()
 }
 
 func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
@@ -84,6 +89,13 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	self.asClient.DefaultPolicy.Timeout = time.Second * time.Duration(int64(self.conf.Timeout))
 	self.asClient.DefaultWritePolicy.SendKey = true
 	self.asClient.DefaultWritePolicy.Expiration = math.MaxUint32
+
+	self.whiteList, err = NewAerospikeWhiteList(self.conf.DccServers, self.conf.WhiteListBackUp)
+	if err != nil {
+		redisLog.Errorf("failed to init aerospike access white list: %v", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -110,7 +122,11 @@ func (self *AerospikeRedisProxy) wrapParserRedisKey(f AsCommandFunc) CommandFunc
 
 		self.proxyStatistics.Statistic(c.cmd, k, ArgEx)
 
-		return f(c, k, w)
+		if err := self.aerospikeAccessAuth(c.cmd, k, ArgEx); err != nil {
+			return err
+		} else {
+			return f(c, k, w)
+		}
 	}
 }
 
@@ -126,8 +142,32 @@ func (self *AerospikeRedisProxy) wrapParserRedisKeyAndField(f AsCommandFuncWithB
 
 		self.proxyStatistics.Statistic(c.cmd, k, nil)
 
-		return f(c, k, fields, w)
+		if err := self.aerospikeAccessAuth(c.cmd, k, nil); err != nil {
+			return err
+		} else {
+			return f(c, k, fields, w)
+		}
 	}
+}
+
+//may only need to pass the client argument
+func (self *AerospikeRedisProxy) aerospikeAccessAuth(cmd string, key *as.Key, argEx [][]byte) error {
+	if !self.whiteList.AuthAccess(key) {
+		return ErrAuthFailed
+
+	} else if (cmd == "mget" || cmd == "del") && argEx != nil {
+		for _, arg := range argEx {
+			if key, err := parserRedisKey(string(arg)); err != nil {
+				return err
+			} else {
+				if !self.whiteList.AuthAccess(key) {
+					return ErrAuthFailed
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
