@@ -1,4 +1,4 @@
 {
     "DccServerAddr":"127.0.0.1:8089",
-    "BackUpPath":"./dccproxy.dat",
+    "BackUpPath":"./dccproxy.dat"
 }
