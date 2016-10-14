@@ -23,6 +23,7 @@ var (
 type AerospikeRedisConf struct {
 	AerospikeServers []string
 	Timeout          int
+	UseWhiteList     bool
 	DccServers       []string
 	WhiteListBackUp  string
 }
@@ -53,7 +54,10 @@ func (self *AerospikeRedisProxy) GetProxyName() string {
 
 func (self *AerospikeRedisProxy) Stop() {
 	self.asClient.Close()
-	self.whiteList.Stop()
+
+	if self.conf.UseWhiteList {
+		self.whiteList.Stop()
+	}
 }
 
 func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
@@ -90,10 +94,12 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	self.asClient.DefaultWritePolicy.SendKey = true
 	self.asClient.DefaultWritePolicy.Expiration = math.MaxUint32
 
-	self.whiteList, err = NewAerospikeWhiteList(self.conf.DccServers, self.conf.WhiteListBackUp)
-	if err != nil {
-		redisLog.Errorf("failed to init aerospike access white list: %v", err)
-		return err
+	if self.conf.UseWhiteList {
+		self.whiteList, err = NewAerospikeWhiteList(self.conf.DccServers, self.conf.WhiteListBackUp)
+		if err != nil {
+			redisLog.Errorf("failed to init aerospike access white list: %v", err)
+			return err
+		}
 	}
 
 	return nil
@@ -152,6 +158,10 @@ func (self *AerospikeRedisProxy) wrapParserRedisKeyAndField(f AsCommandFuncWithB
 
 //may only need to pass the client argument
 func (self *AerospikeRedisProxy) aerospikeAccessAuth(cmd string, key *as.Key, argEx [][]byte) error {
+	if !self.conf.UseWhiteList {
+		return nil
+	}
+
 	if !self.whiteList.AuthAccess(key) {
 		return ErrAuthFailed
 
