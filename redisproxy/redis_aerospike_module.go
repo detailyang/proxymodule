@@ -55,7 +55,7 @@ func (self *AerospikeRedisProxy) GetProxyName() string {
 func (self *AerospikeRedisProxy) Stop() {
 	self.asClient.Close()
 
-	if self.conf.UseWhiteList {
+	if self.whiteList != nil {
 		self.whiteList.Stop()
 	}
 }
@@ -158,7 +158,7 @@ func (self *AerospikeRedisProxy) wrapParserRedisKeyAndField(f AsCommandFuncWithB
 
 //may only need to pass the client argument
 func (self *AerospikeRedisProxy) aerospikeAccessAuth(cmd string, key *as.Key, argEx [][]byte) error {
-	if !self.conf.UseWhiteList {
+	if self.whiteList == nil {
 		return nil
 	}
 

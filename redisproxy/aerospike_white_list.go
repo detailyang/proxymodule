@@ -34,11 +34,11 @@ func NewAerospikeWhiteList(serverAddrs []string, backupFile string) (*aerospikeW
 		return nil, err
 	} else {
 		if len(dccRsp.RspList) != 1 || dccRsp.RspList[0].Type != ds.ValueTypeCombination {
-			return nil, errors.New("dcc server response format error")
+			return nil, errors.New("DCC server response format is illegal")
 		}
 		for _, v := range dccRsp.RspList[0].CombVal {
 			if v.Value == "1" {
-				redisLog.Infof("add set into white list, %s", v.Value)
+				redisLog.Infof("add set into white list, %s", v.Key)
 				asWhiteList.whiteList[v.Key] = struct{}{}
 			}
 		}
@@ -58,13 +58,14 @@ type aerospikeWhiteList struct {
 func (self *aerospikeWhiteList) Update(dccRsp *ds.Response) {
 
 	if len(dccRsp.RspList) != 1 || dccRsp.RspList[0].Type != ds.ValueTypeCombination {
-		redisLog.Warningln("response format from dcc is illegal")
+		redisLog.Warningln("response format from DCC is illegal")
 	} else {
 
 		updatedwhiteList := make(map[string]struct{})
 
 		for _, v := range dccRsp.RspList[0].CombVal {
 			if v.Value == "1" {
+				redisLog.Infof("add set into white list, %s", v.Key)
 				updatedwhiteList[v.Key] = struct{}{}
 			}
 		}
