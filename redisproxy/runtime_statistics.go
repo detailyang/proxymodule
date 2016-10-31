@@ -31,6 +31,9 @@ func init() {
 func NewAerospikeProxyStatistics() *AerospikeProxyStatistics {
 	statisticsModule := &AerospikeProxyStatistics{
 		statisticsData: make(map[string]map[statisticsUnit]uint64),
+		slowOperation: map[string]uint64{
+			"2ms": 0, "5ms": 0, "10ms": 0, "20ms": 0,
+		},
 	}
 
 	statisticsModule.genMonitorData = wrapGenMonitorData(statisticsModule)
@@ -49,13 +52,14 @@ type AerospikeProxyStatistics struct {
 
 	accumulatedOpTime int64
 	failedOperation   uint64
-	slowOperation     uint64
+	slowOperation     map[string]uint64
 
 	genMonitorData func() []byte
 }
 
 func (self *AerospikeProxyStatistics) GenInfoBytes() []byte {
 	var buffer bytes.Buffer
+	var slowBuffer bytes.Buffer
 	var total uint64
 
 	buffer.WriteString("#Statistic\r\n")
@@ -71,6 +75,9 @@ func (self *AerospikeProxyStatistics) GenInfoBytes() []byte {
 		buffer.WriteString(fmt.Sprintf("%s:%d\r\n", cmd, sum))
 		total += sum
 	}
+	for cost, count := range self.slowOperation {
+		slowBuffer.WriteString(fmt.Sprintf("%s slow operation:%d\r\n", cost, count))
+	}
 	self.Mutex.Unlock()
 
 	buffer.WriteString(fmt.Sprintf("total operation:%d\r\n", total))
@@ -78,11 +85,10 @@ func (self *AerospikeProxyStatistics) GenInfoBytes() []byte {
 	buffer.WriteString(fmt.Sprintf("failed operation:%d\r\n",
 		atomic.LoadUint64(&self.failedOperation)))
 
-	buffer.WriteString(fmt.Sprintf("slow operation:%d\r\n",
-		atomic.LoadUint64(&self.slowOperation)))
+	buffer.Write(slowBuffer.Bytes())
 
 	buffer.WriteString(fmt.Sprintf("accumulated time:%dus\r\n",
-		atomic.LoadInt64(&self.accumulatedOpTime)))
+		atomic.LoadInt64(&self.accumulatedOpTime)/1000))
 
 	return buffer.Bytes()
 }
@@ -91,8 +97,26 @@ func (self *AerospikeProxyStatistics) IncrFailedOperation() {
 	atomic.AddUint64(&self.failedOperation, 1)
 }
 
-func (self *AerospikeProxyStatistics) IncrSlowOperation() {
-	atomic.AddUint64(&self.slowOperation, 1)
+func (self *AerospikeProxyStatistics) IncrSlowOperation(cost time.Duration) {
+	self.Mutex.Lock()
+	defer self.Mutex.Unlock()
+
+	switch {
+	case cost > 20*time.Millisecond:
+		self.slowOperation["20ms"] += 1
+		fallthrough
+	case cost > 10*time.Millisecond:
+		self.slowOperation["10ms"] += 1
+		fallthrough
+	case cost > 5*time.Millisecond:
+		self.slowOperation["5ms"] += 1
+		fallthrough
+	case cost > 2*time.Millisecond:
+		self.slowOperation["2ms"] += 1
+	default:
+		return
+	}
+
 }
 
 func (self *AerospikeProxyStatistics) IncrOpTime(duration int64) {
@@ -206,13 +230,14 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 		statisticsData    map[string]map[statisticsUnit]uint64
 		accumulatedOpTime int64
 		failedOperation   uint64
-		slowOperation     uint64
+		slowOperation     map[string]uint64
 	}{
 		make(map[string]map[statisticsUnit]uint64),
-		0, 0, 0,
+		0, 0, make(map[string]uint64),
 	}
 
 	rawMonitorData := make(map[string]map[statisticsUnit]uint64)
+	rawSlowOperation := make(map[string]uint64)
 
 	for _, cmd := range supportedCommands {
 		snapshot.statisticsData[cmd] = make(map[statisticsUnit]uint64)
@@ -222,7 +247,6 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 	f = func() []byte {
 
 		failedOperation := atomic.LoadUint64(&proxy.failedOperation)
-		slowOperation := atomic.LoadUint64(&proxy.slowOperation)
 		accumulatedOpTime := atomic.LoadInt64(&proxy.accumulatedOpTime)
 		var total uint64
 
@@ -241,6 +265,9 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 			} else {
 				redisLog.Errorf("execute unsupported command, %s", cmd)
 			}
+		}
+		for k, v := range proxy.slowOperation {
+			rawSlowOperation[k] = v
 		}
 		proxy.Mutex.Unlock()
 
@@ -276,16 +303,32 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 
 		}
 
+		for cost, count := range rawSlowOperation {
+			monitorSample := newMonitorData()
+			monitorSample.Tags[monitorCategory] = cost
+			monitorSample.Business = monitorBinuess
+			monitorSample.Timestamp = timestamp
+
+			monitorSample.Metrics["Slow"] = count - snapshot.slowOperation[cost]
+			snapshot.slowOperation[cost] = count
+			proxyMonitorData = append(proxyMonitorData, monitorSample)
+		}
+
 		//the overall monitor data
 		overViewData := newMonitorData()
 		overViewData.Metrics["Failed"] = failedOperation - snapshot.failedOperation
 		snapshot.failedOperation = failedOperation
-		overViewData.Metrics["Slow"] = slowOperation - snapshot.slowOperation
-		snapshot.slowOperation = slowOperation
-		overViewData.Metrics["CostTime"] = uint64(accumulatedOpTime - snapshot.accumulatedOpTime)
+		overViewData.Metrics["CostTime"] = uint64(accumulatedOpTime-snapshot.accumulatedOpTime) / 1000
 		snapshot.accumulatedOpTime = accumulatedOpTime
 		overViewData.Metrics["Total"] = total
-		overViewData.Tags[monitorCategory] = "OverView"
+		if total == 0 {
+			overViewData.Metrics["Avg"] = 0
+		} else {
+			overViewData.Metrics["Avg"] = overViewData.Metrics["CostTime"] / total
+		}
+
+		//overViewData.Tags[monitorCategory] = "OverView"
+
 		overViewData.Business = monitorBinuess
 		overViewData.Timestamp = timestamp
 		proxyMonitorData = append(proxyMonitorData, overViewData)

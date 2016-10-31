@@ -241,7 +241,7 @@ func (self *AerospikeRedisProxy) infoCommand(c *Client, w ResponseWriter) error 
 
 	info.Write(self.proxyStatistics.GenInfoBytes())
 
-	if self.conf.UseWhiteList {
+	if self.whiteList != nil {
 		info.WriteString("\r\n")
 		info.Write(self.whiteList.GenInfoBytes())
 	}

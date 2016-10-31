@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/absolute8511/grace/gracenet"
 	"github.com/absolute8511/proxymodule/common"
@@ -12,7 +13,7 @@ import (
 var redisLog = common.NewLevelLogger(1, nil)
 
 type ProxyStatisticsModule interface {
-	IncrSlowOperation()
+	IncrSlowOperation(time.Duration)
 	IncrFailedOperation()
 	IncrOpTime(int64)
 	GenMonitorData() []byte

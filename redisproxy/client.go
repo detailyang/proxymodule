@@ -102,10 +102,10 @@ func (c *Client) perform() {
 	}
 
 	if c.proxyStatistics != nil {
-		if duration > time.Millisecond*20 {
-			c.proxyStatistics.IncrSlowOperation()
+		if duration > time.Millisecond*2 {
+			c.proxyStatistics.IncrSlowOperation(duration)
 		}
-		c.proxyStatistics.IncrOpTime(duration.Nanoseconds() / 1000)
+		c.proxyStatistics.IncrOpTime(duration.Nanoseconds())
 	}
 
 	if err != nil {
