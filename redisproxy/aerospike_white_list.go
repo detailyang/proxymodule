@@ -23,7 +23,7 @@ func NewAerospikeWhiteList(serverAddrs []string, backupFile string) (*aerospikeW
 	}
 
 	asWhiteList := &aerospikeWhiteList{
-		d3client:  ds.NewDccClient(dccServerAddr, backupFile),
+		d3client:  ds.NewDccClient(dccServerAddr, backupFile, dccApp),
 		whiteList: make(map[string]struct{}),
 	}
 
