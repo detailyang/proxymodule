@@ -81,7 +81,6 @@ func NewRedisProxy(addr string, module string, moduleConfig string, grace *grace
 }
 
 func (self *RedisProxy) Start() {
-	defer redisLog.Flush()
 	self.wg.Add(1)
 	defer self.wg.Done()
 	redisLog.Infof("redis proxy module %v on : %v", self.proxyModule.GetProxyName(), self.laddr)
@@ -119,7 +118,6 @@ func (self *RedisProxy) Stop() {
 	self.proxyModule.Stop()
 	self.wg.Wait()
 	redisLog.Infof("wait redis proxy done: %v", self.proxyModule.GetProxyName())
-	redisLog.Flush()
 }
 
 func (self *RedisProxy) ServeRedis() {

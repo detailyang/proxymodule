@@ -1,8 +1,10 @@
 package redisproxy
 
 import (
-	as "github.com/aerospike/aerospike-client-go"
+	"fmt"
 	"strconv"
+
+	as "github.com/aerospike/aerospike-client-go"
 )
 
 func (self *AerospikeRedisProxy) hsetCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
@@ -38,7 +40,7 @@ func (self *AerospikeRedisProxy) hgetCommand(c *Client, key *as.Key, bins []*as.
 		d := v.Bins[binName]
 		switch vt := d.(type) {
 		case string:
-			w.WriteString(vt)
+			w.WriteBulk([]byte(vt))
 		case []byte:
 			w.WriteBulk(vt)
 		case int64:
@@ -101,12 +103,17 @@ func (self *AerospikeRedisProxy) hincrbyCommand(c *Client, key *as.Key, bins []*
 		return ErrCmdParams
 	}
 
-	delta, err := strconv.Atoi(string(args[2]))
+	increment, err := strconv.ParseInt(string(args[2]), 10, 64)
 	if err != nil {
-		return ErrFieldValue
+		return err
 	}
 
-	w.WriteInteger(int64(delta))
+	if v, err := self.increase(key, string(args[1]), increment); err != nil {
+		return fmt.Errorf("hincrby [%s, %s] execute failed, %s", string(args[0]), string(args[1]), err.Error())
+	} else {
+		w.WriteInteger(v)
+	}
+
 	return nil
 }
 

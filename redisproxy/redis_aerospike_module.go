@@ -85,10 +85,15 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	} else {
 		logger.Logger.SetLevel(logger.WARNING)
 	}
-	self.asClient, err = as.NewClientWithPolicyAndHost(nil, hosts...)
+
+	asClientPolicy := as.NewClientPolicy()
+	asClientPolicy.FailIfNotConnected = false
+	self.asClient, err = as.NewClientWithPolicyAndHost(asClientPolicy, hosts...)
 	if err != nil {
 		redisLog.Errorf("failed to init aerospike client: %v", err)
 		return err
+	} else if !self.asClient.IsConnected() {
+		redisLog.Errorf("redis2aerospike proxy can't connect to cluster, please check network condition and seed nodes")
 	}
 	self.asClient.DefaultPolicy.Timeout = time.Second * time.Duration(int64(self.conf.Timeout))
 	self.asClient.DefaultWritePolicy.SendKey = true
@@ -189,6 +194,10 @@ func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("mget", self.wrapParserRedisKey(self.mgetCommand))
 	router.Register("expire", self.wrapParserRedisKey(self.expireCommand))
 	router.Register("ttl", self.wrapParserRedisKey(self.ttlCommand))
+	router.Register("incr", self.wrapParserRedisKey(self.incrCommand))
+	router.Register("incrby", self.wrapParserRedisKey(self.incrbyCommand))
+	router.Register("decr", self.wrapParserRedisKey(self.decrCommand))
+	router.Register("decrby", self.wrapParserRedisKey(self.decrbyCommand))
 	router.Register("hget", self.wrapParserRedisKeyAndField(self.hgetCommand))
 	router.Register("hgetall", self.wrapParserRedisKeyAndField(self.hgetallCommand))
 	router.Register("hmget", self.wrapParserRedisKeyAndField(self.hmgetCommand))
@@ -196,6 +205,7 @@ func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("hset", self.wrapParserRedisKeyAndField(self.hsetCommand))
 	router.Register("hdel", self.wrapParserRedisKeyAndField(self.hdelCommand))
 	router.Register("hexists", self.wrapParserRedisKeyAndField(self.hexistsCommand))
+	router.Register("hincrby", self.wrapParserRedisKeyAndField(self.hincrbyCommand))
 	router.Register("info", self.infoCommand)
 }
 

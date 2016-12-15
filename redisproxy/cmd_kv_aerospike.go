@@ -3,6 +3,8 @@ package redisproxy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 
 	as "github.com/aerospike/aerospike-client-go"
@@ -10,6 +12,7 @@ import (
 
 const (
 	singleBinName = "redisvalue"
+	incrMaxRetry  = 3
 )
 
 func writeSingleRecord(w ResponseWriter, bins as.BinMap) {
@@ -18,7 +21,7 @@ func writeSingleRecord(w ResponseWriter, bins as.BinMap) {
 		case int64:
 			w.WriteInteger(vt)
 		case string:
-			w.WriteString(vt)
+			w.WriteBulk([]byte(vt))
 		case []byte:
 			w.WriteBulk(vt)
 		default:
@@ -250,18 +253,112 @@ func (self *AerospikeRedisProxy) infoCommand(c *Client, w ResponseWriter) error 
 	return nil
 }
 
-func (self *AerospikeRedisProxy) incrCommand(c *Client) error {
+func (self *AerospikeRedisProxy) incrCommand(c *Client, key *as.Key, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 1 {
+		return ErrCmdParams
+	}
+
+	if v, err := self.increase(key, singleBinName, 1); err != nil {
+		return fmt.Errorf("incr [%s] execute failed, %s", string(args[0]), err.Error())
+	} else {
+		w.WriteInteger(v)
+	}
+
 	return nil
 }
 
-func (self *AerospikeRedisProxy) decrCommand(c *Client) error {
+func (self *AerospikeRedisProxy) decrCommand(c *Client, key *as.Key, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 1 {
+		return ErrCmdParams
+	}
+
+	if v, err := self.increase(key, singleBinName, -1); err != nil {
+		return fmt.Errorf("decr [%s] execute failed, %s", string(args[0]), err.Error())
+	} else {
+		w.WriteInteger(v)
+	}
+
 	return nil
 }
 
-func (self *AerospikeRedisProxy) incrbyCommand(c *Client) error {
+func (self *AerospikeRedisProxy) incrbyCommand(c *Client, key *as.Key, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 2 {
+		return ErrCmdParams
+	}
+
+	increment, err := strconv.ParseInt(string(args[1]), 10, 64)
+	if err != nil {
+		return err
+	}
+
+	if v, err := self.increase(key, singleBinName, increment); err != nil {
+		return fmt.Errorf("incrby [%s] execute failed, %s", string(args[0]), err.Error())
+	} else {
+		w.WriteInteger(v)
+	}
+
 	return nil
 }
 
-func (self *AerospikeRedisProxy) decrbyCommand(c *Client) error {
+func (self *AerospikeRedisProxy) decrbyCommand(c *Client, key *as.Key, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 2 {
+		return ErrCmdParams
+	}
+
+	decrement, err := strconv.ParseInt(string(args[1]), 10, 64)
+	if err != nil {
+		return err
+	}
+
+	if v, err := self.increase(key, singleBinName, -decrement); err != nil {
+		return fmt.Errorf("decrby [%s] execute failed, %s", string(args[0]), err.Error())
+	} else {
+		w.WriteInteger(v)
+	}
+
 	return nil
+}
+
+func (self *AerospikeRedisProxy) increase(key *as.Key, binName string, increment int64) (int64, error) {
+	var preVal int64
+
+	incrPolicy := *self.asClient.DefaultWritePolicy
+	incrPolicy.GenerationPolicy = as.EXPECT_GEN_EQUAL
+
+	for i := 0; i < incrMaxRetry; i++ {
+		if v, err := self.asClient.Get(nil, key, binName); err != nil {
+			return 0, err
+		} else if v != nil {
+			if binValue, ok := v.Bins[binName]; ok {
+				switch vt := binValue.(type) {
+				case int64:
+					preVal = vt
+				case []byte:
+					preVal, err = strconv.ParseInt(string(vt), 10, 64)
+				case string:
+					preVal, err = strconv.ParseInt(vt, 10, 64)
+				default:
+					return 0, errors.New("ERR, value type is not an integer")
+				}
+			}
+			if err != nil {
+				return 0, errors.New("ERR, value type is not an integer")
+			}
+			incrPolicy.Generation = v.Generation
+		}
+
+		bin := as.NewBin(binName, []byte(strconv.FormatInt(preVal+increment, 10)))
+
+		if err := self.asClient.PutBins(nil, key, bin); err != nil {
+			redisLog.Infof("incrCommand execute [ %v ] failed: %v", *key, err)
+		} else {
+			return preVal + increment, nil
+		}
+	}
+
+	return 0, errors.New("ERR, too many simultaneously operations on the key")
 }

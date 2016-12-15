@@ -73,14 +73,16 @@ func (self *ProxyModuleMgr) StopAll() {
 	self.Mutex.Lock()
 	defer self.Mutex.Unlock()
 
+	defer func() {
+		if proxyModuleLog != nil {
+			proxyModuleLog.Flush()
+		}
+	}()
+
 	close(self.monitorQuitC)
 
 	for _, s := range self.servers {
 		s.Stop()
-	}
-
-	if proxyModuleLog != nil {
-		proxyModuleLog.Flush()
 	}
 }
 
