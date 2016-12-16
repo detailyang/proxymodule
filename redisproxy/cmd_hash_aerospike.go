@@ -35,24 +35,26 @@ func (self *AerospikeRedisProxy) hgetCommand(c *Client, key *as.Key, bins []*as.
 	} else {
 		if v == nil {
 			w.WriteBulk(nil)
-			return nil
-		}
-		d := v.Bins[binName]
-		switch vt := d.(type) {
-		case string:
-			w.WriteBulk([]byte(vt))
-		case []byte:
-			w.WriteBulk(vt)
-		case int64:
-			w.WriteInteger(vt)
-		case int32:
-			w.WriteInteger(int64(vt))
-		case int:
-			w.WriteInteger(int64(vt))
-		case nil:
-			w.WriteBulk(nil)
-		default:
-			return ErrFieldValue
+		} else {
+			var resp []byte
+			d := v.Bins[binName]
+			switch vt := d.(type) {
+			case string:
+				resp = []byte(vt)
+			case []byte:
+				resp = vt
+			case int64:
+				resp = []byte(strconv.FormatInt(vt, 10))
+			case int32:
+				resp = []byte(strconv.FormatInt(int64(vt), 10))
+			case int:
+				resp = []byte(strconv.Itoa(vt))
+			case nil:
+				w.WriteBulk(nil)
+			default:
+				return ErrFieldValue
+			}
+			w.WriteBulk(resp)
 		}
 	}
 

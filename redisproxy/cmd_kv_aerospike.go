@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	as "github.com/aerospike/aerospike-client-go"
@@ -16,22 +17,26 @@ const (
 )
 
 func writeSingleRecord(w ResponseWriter, bins as.BinMap) {
+	var resp []byte
 	if d, ok := bins[singleBinName]; ok && len(bins) == 1 {
 		switch vt := d.(type) {
+		case int:
+			resp = []byte(strconv.Itoa(vt))
+		case int32:
+			resp = []byte(strconv.FormatInt(int64(vt), 10))
 		case int64:
-			w.WriteInteger(vt)
+			resp = []byte(strconv.FormatInt(vt, 10))
 		case string:
-			w.WriteBulk([]byte(vt))
+			resp = []byte(vt)
 		case []byte:
-			w.WriteBulk(vt)
+			resp = vt
 		default:
-			jsondata, _ := json.Marshal(d)
-			w.WriteBulk(jsondata)
+			resp, _ = json.Marshal(d)
 		}
 	} else {
-		jsondata, _ := json.Marshal(bins)
-		w.WriteBulk(jsondata)
+		resp, _ = json.Marshal(bins)
 	}
+	w.WriteBulk(resp)
 }
 
 func (self *AerospikeRedisProxy) getCommand(c *Client, key *as.Key, w ResponseWriter) error {
@@ -335,6 +340,10 @@ func (self *AerospikeRedisProxy) increase(key *as.Key, binName string, increment
 		} else if v != nil {
 			if binValue, ok := v.Bins[binName]; ok {
 				switch vt := binValue.(type) {
+				case int:
+					preVal = int64(vt)
+				case int32:
+					preVal = int64(vt)
 				case int64:
 					preVal = vt
 				case []byte:
@@ -342,7 +351,7 @@ func (self *AerospikeRedisProxy) increase(key *as.Key, binName string, increment
 				case string:
 					preVal, err = strconv.ParseInt(vt, 10, 64)
 				default:
-					return 0, errors.New("ERR, value type is not an integer")
+					return 0, fmt.Errorf("ERR, value type [%v] is not an integer", reflect.TypeOf(binValue).Name())
 				}
 			}
 			if err != nil {
@@ -353,8 +362,8 @@ func (self *AerospikeRedisProxy) increase(key *as.Key, binName string, increment
 
 		bin := as.NewBin(binName, []byte(strconv.FormatInt(preVal+increment, 10)))
 
-		if err := self.asClient.PutBins(nil, key, bin); err != nil {
-			redisLog.Infof("incrCommand execute [ %v ] failed: %v", *key, err)
+		if err := self.asClient.PutBins(&incrPolicy, key, bin); err != nil {
+			redisLog.Infof("incrCommand execute [%v] failed: %v", *key, err)
 		} else {
 			return preVal + increment, nil
 		}

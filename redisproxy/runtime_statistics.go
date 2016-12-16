@@ -213,17 +213,24 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 	supportedCommands := []string{
 		"get", "del", "set", "setex", "exists", "mget", "expire",
 		"ttl", "hget", "hgetall", "hmget", "hmset", "hset", "hdel", "hexists",
-		"info"}
+		"info", "incr", "incrby", "hincrby", "decr", "decrby"}
 
 	metricsCmd := map[string]struct{}{
-		"get":    struct{}{},
-		"del":    struct{}{},
-		"ttl":    struct{}{},
-		"exists": struct{}{},
-		"mget":   struct{}{},
-		"set":    struct{}{},
-		"setex":  struct{}{},
-		"expire": struct{}{},
+		"get":     struct{}{},
+		"del":     struct{}{},
+		"ttl":     struct{}{},
+		"exists":  struct{}{},
+		"mget":    struct{}{},
+		"set":     struct{}{},
+		"setex":   struct{}{},
+		"expire":  struct{}{},
+		"hget":    struct{}{},
+		"hset":    struct{}{},
+		"incr":    struct{}{},
+		"incrby":  struct{}{},
+		"hincrby": struct{}{},
+		"decr":    struct{}{},
+		"decrby":  struct{}{},
 	}
 
 	snapshot := struct {
