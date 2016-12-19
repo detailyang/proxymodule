@@ -102,8 +102,8 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	if self.conf.UseWhiteList {
 		self.whiteList, err = NewAerospikeWhiteList(self.conf.DccServers, self.conf.WhiteListBackUp)
 		if err != nil {
-			redisLog.Errorf("failed to init aerospike access white list: %v", err)
-			return err
+			redisLog.Errorf("init aerospike access white list failed: %v, all access will be authorized", err)
+			self.whiteList = nil
 		}
 	}
 

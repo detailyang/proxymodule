@@ -83,6 +83,11 @@ func (self *aerospikeWhiteList) AuthAccess(key *as.Key) bool {
 	self.Mutex.Lock()
 	defer self.Mutex.Unlock()
 
+	if len(self.whiteList) == 0 {
+		redisLog.Errorf("KVProxy access whitelist is empty, all access are authorized")
+		return true
+	}
+
 	if _, ok := self.whiteList[key.Namespace()+":"+key.SetName()]; !ok {
 		return false
 	} else {
