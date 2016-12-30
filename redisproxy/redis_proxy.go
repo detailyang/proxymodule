@@ -10,6 +10,10 @@ import (
 	"github.com/absolute8511/proxymodule/common"
 )
 
+const (
+	connChannelLength = 128
+)
+
 var redisLog = common.NewLevelLogger(1, nil)
 
 type ProxyStatisticsModule interface {
@@ -36,12 +40,12 @@ func RegisterRedisProxyModule(name string, h RedisProxyModuleCreateFunc) {
 }
 
 type RedisProxy struct {
-	laddr       string
+	laddrs      []string
 	quitChan    chan bool
 	proxyModule RedisProxyModule
 	router      *CmdRouter
 	wg          sync.WaitGroup
-	l           net.Listener
+	listeners   []net.Listener
 	grace       *gracenet.Net
 }
 
@@ -51,18 +55,19 @@ func SetLogger(level int32, l common.Logger) {
 	redisLog.SetLevel(level)
 }
 
-func NewRedisProxy(addr string, module string, moduleConfig string, grace *gracenet.Net) *RedisProxy {
+func NewRedisProxy(addrs string, module string, moduleConfig string, grace *gracenet.Net) *RedisProxy {
 	if _, ok := gRedisProxyModuleFactory[module]; !ok {
 		redisLog.Errorf("redis proxy module not found: %v", module)
 		return nil
 	}
 
 	rp := &RedisProxy{
-		laddr:       addr,
+		laddrs:      strings.Split(addrs, ","),
 		quitChan:    make(chan bool),
 		proxyModule: gRedisProxyModuleFactory[module](),
 		router:      NewCmdRouter(),
 		grace:       grace,
+		listeners:   make([]net.Listener, 0, len(addrs)),
 	}
 	if rp.proxyModule == nil {
 		redisLog.Errorf("create module failed: %v", module)
@@ -83,28 +88,34 @@ func NewRedisProxy(addr string, module string, moduleConfig string, grace *grace
 func (self *RedisProxy) Start() {
 	self.wg.Add(1)
 	defer self.wg.Done()
-	redisLog.Infof("redis proxy module %v on : %v", self.proxyModule.GetProxyName(), self.laddr)
+	redisLog.Infof("redis proxy module %v on : %v", self.proxyModule.GetProxyName(), self.laddrs)
 	defer redisLog.Infof("redis proxy %v stopped.", self.proxyModule.GetProxyName())
 
 	var err error
-	if self.grace != nil {
-		if strings.HasPrefix(self.laddr, "unix://") {
-			unixpath := self.laddr[len("unix://"):]
-			self.l, err = self.grace.Listen("unix", unixpath)
+
+	for _, laddr := range self.laddrs {
+		var l net.Listener
+		if self.grace != nil {
+			if strings.HasPrefix(laddr, "unix://") {
+				unixpath := laddr[len("unix://"):]
+				l, err = self.grace.Listen("unix", unixpath)
+			} else {
+				l, err = self.grace.Listen("tcp", laddr)
+			}
 		} else {
-			self.l, err = self.grace.Listen("tcp", self.laddr)
+			if strings.HasPrefix(laddr, "unix://") {
+				unixpath := laddr[len("unix://"):]
+				l, err = net.Listen("unix", unixpath)
+			} else {
+				l, err = net.Listen("tcp", laddr)
+			}
 		}
-	} else {
-		if strings.HasPrefix(self.laddr, "unix://") {
-			unixpath := self.laddr[len("unix://"):]
-			self.l, err = net.Listen("unix", unixpath)
+		if err != nil {
+			redisLog.Errorf("listen address laddr[%s] err [%v], proxy start failed", laddr, err)
+			return
 		} else {
-			self.l, err = net.Listen("tcp", self.laddr)
+			self.listeners = append(self.listeners, l)
 		}
-	}
-	if err != nil {
-		redisLog.Errorf("err: %v", err)
-		return
 	}
 
 	self.ServeRedis()
@@ -112,34 +123,56 @@ func (self *RedisProxy) Start() {
 
 func (self *RedisProxy) Stop() {
 	close(self.quitChan)
-	if self.l != nil {
-		self.l.Close()
+
+	for _, l := range self.listeners {
+		l.Close()
 	}
+
 	self.proxyModule.Stop()
 	self.wg.Wait()
-	redisLog.Infof("wait redis proxy done: %v", self.proxyModule.GetProxyName())
+	redisLog.Infof("wait redis proxy done: %v, address: %v", self.proxyModule.GetProxyName(), self.laddrs)
 }
 
 func (self *RedisProxy) ServeRedis() {
 	pool := &sync.Pool{New: func() interface{} { return NewEmptyClientRESP(self.quitChan) }}
-	for {
-		// accept client request and call handler
-		conn, err := self.l.Accept()
-		if err != nil {
-			redisLog.Infof("accept error: %v", err)
-			break
-		}
-		client := pool.Get().(*RespClient)
-		client.Reset(conn)
-		client.RegCmds = self.router
-		client.proxyStatistics = self.proxyModule.GetStatisticsModule()
+	connCh := make(chan net.Conn, connChannelLength)
 
+	for _, l := range self.listeners {
 		self.wg.Add(1)
-		go func() {
+		go func(l net.Listener) {
 			defer self.wg.Done()
-			client.Run()
-			pool.Put(client)
-		}()
+			for {
+				if conn, err := l.Accept(); err != nil {
+					redisLog.Infof("accept error: %v", err)
+					break
+				} else {
+					connCh <- conn
+				}
+			}
+		}(l)
+	}
+
+	for {
+		select {
+		case conn := <-connCh:
+			client := pool.Get().(*RespClient)
+			client.Reset(conn)
+			client.RegCmds = self.router
+			client.proxyStatistics = self.proxyModule.GetStatisticsModule()
+
+			self.wg.Add(1)
+			go func() {
+				defer self.wg.Done()
+				client.Run()
+				pool.Put(client)
+			}()
+
+		case <-self.quitChan:
+			if len(connCh) == 0 {
+				redisLog.Infof("redis proxy service quitted, [%v]", self.laddrs)
+				return
+			}
+		}
 	}
 }
 
