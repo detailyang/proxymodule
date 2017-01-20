@@ -2,8 +2,10 @@ package redisproxy
 
 import (
 	"net"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/grace/gracenet"
@@ -12,7 +14,13 @@ import (
 
 const (
 	connChannelLength = 128
+	acceptInterval    = 3
 )
+
+type netListenerEx interface {
+	net.Listener
+	SetDeadline(t time.Time) error
+}
 
 var redisLog = common.NewLevelLogger(1, nil)
 
@@ -42,6 +50,7 @@ func RegisterRedisProxyModule(name string, h RedisProxyModuleCreateFunc) {
 type RedisProxy struct {
 	laddrs      []string
 	quitChan    chan bool
+	hotUpgradeC chan struct{}
 	proxyModule RedisProxyModule
 	router      *CmdRouter
 	wg          sync.WaitGroup
@@ -64,6 +73,7 @@ func NewRedisProxy(addrs string, module string, moduleConfig string, grace *grac
 	rp := &RedisProxy{
 		laddrs:      strings.Split(addrs, ","),
 		quitChan:    make(chan bool),
+		hotUpgradeC: make(chan struct{}),
 		proxyModule: gRedisProxyModuleFactory[module](),
 		router:      NewCmdRouter(),
 		grace:       grace,
@@ -128,25 +138,69 @@ func (self *RedisProxy) Stop() {
 		l.Close()
 	}
 
-	self.proxyModule.Stop()
 	self.wg.Wait()
-	redisLog.Infof("wait redis proxy done: %v, address: %v", self.proxyModule.GetProxyName(), self.laddrs)
+
+	self.proxyModule.Stop()
+	redisLog.Infof("quit: wait redis proxy done: %v, address: %v", self.proxyModule.GetProxyName(), self.laddrs)
+}
+
+func (self *RedisProxy) HotUpgrade() {
+	close(self.hotUpgradeC)
+	self.wg.Wait()
+
+	self.proxyModule.Stop()
+	redisLog.Infof("hot upgrade: wait redis proxy done: %v, address: %v", self.proxyModule.GetProxyName(), self.laddrs)
 }
 
 func (self *RedisProxy) ServeRedis() {
 	pool := &sync.Pool{New: func() interface{} { return NewEmptyClientRESP(self.quitChan) }}
 	connCh := make(chan net.Conn, connChannelLength)
+	pendingListeners := int64(len(self.listeners))
 
 	for _, l := range self.listeners {
 		self.wg.Add(1)
 		go func(l net.Listener) {
-			defer self.wg.Done()
+			defer func() {
+				if atomic.AddInt64(&pendingListeners, -1) == 0 {
+					redisLog.Info("all pending listeners have been stopped from accepting connections, close connCh")
+					close(connCh)
+				}
+				select {
+				case <-self.quitChan:
+					if ul, ok := l.(*net.UnixListener); ok {
+						//close UnixListener will not unlink the unix domain socket file at the upgraded child process
+						//we need to remove it manually
+						os.Remove(ul.Addr().String())
+					}
+				default:
+				}
+				self.wg.Done()
+			}()
+
+			lex, ok := l.(netListenerEx)
+			if !ok {
+				redisLog.Errorf("use unknown Listener at %s", l.Addr().String())
+				return
+			}
+			du := time.Duration(acceptInterval) * time.Second
 			for {
+				//set timeout to prevent the program from blocked forever
+				lex.SetDeadline(time.Now().Add(du))
 				if conn, err := l.Accept(); err != nil {
-					redisLog.Infof("accept error: %v", err)
-					break
+					redisLog.Infof("accept at address: %s, error: %v", l.Addr().String(), err)
 				} else {
 					connCh <- conn
+				}
+
+				select {
+				case <-self.quitChan:
+					redisLog.Infof("process has been stoped, stop accepting connections from %s", l.Addr().String())
+					return
+				case <-self.hotUpgradeC:
+					redisLog.Infof("hot upgrade, process [pid: %d] stop accepting connections from %s", os.Getpid(), l.Addr().String())
+					return
+				default:
+					continue
 				}
 			}
 		}(l)
@@ -154,22 +208,21 @@ func (self *RedisProxy) ServeRedis() {
 
 	for {
 		select {
-		case conn := <-connCh:
-			client := pool.Get().(*RespClient)
-			client.Reset(conn)
-			client.RegCmds = self.router
-			client.proxyStatistics = self.proxyModule.GetStatisticsModule()
+		case conn, ok := <-connCh:
+			if ok {
+				client := pool.Get().(*RespClient)
+				client.Reset(conn)
+				client.RegCmds = self.router
+				client.proxyStatistics = self.proxyModule.GetStatisticsModule()
 
-			self.wg.Add(1)
-			go func() {
-				defer self.wg.Done()
-				client.Run()
-				pool.Put(client)
-			}()
-
-		case <-self.quitChan:
-			if len(connCh) == 0 {
-				redisLog.Infof("redis proxy service quitted, [%v]", self.laddrs)
+				self.wg.Add(1)
+				go func() {
+					defer self.wg.Done()
+					client.Run()
+					pool.Put(client)
+				}()
+			} else {
+				redisLog.Infoln("all listeners have been stopped, ServeRedis exit now")
 				return
 			}
 		}
