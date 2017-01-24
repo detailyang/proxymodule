@@ -162,7 +162,7 @@ func (self *RedisProxy) ServeRedis() {
 		go func(l net.Listener) {
 			defer func() {
 				if atomic.AddInt64(&pendingListeners, -1) == 0 {
-					redisLog.Info("all pending listeners have been stopped from accepting connections, close connCh")
+					redisLog.Infof("all pending listeners have been stopped from accepting connections, close connCh")
 					close(connCh)
 				}
 				select {
