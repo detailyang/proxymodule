@@ -13,6 +13,10 @@ var (
 	supportedCommands []string
 )
 
+const (
+	defaultTendInterval = 3
+)
+
 type CodisServer struct {
 	ServerAddr string
 }
@@ -149,6 +153,10 @@ func (proxy *CodisProxy) GetStatisticsModule() ProxyStatisticsModule {
 }
 
 func (proxy *CodisProxy) tend() {
+	if proxy.conf.TendInterval == 0 {
+		proxy.conf.TendInterval = defaultTendInterval
+	}
+
 	tendTicker := time.NewTicker(time.Duration(proxy.conf.TendInterval) * time.Second)
 	defer tendTicker.Stop()
 
