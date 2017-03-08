@@ -40,7 +40,6 @@ type Client struct {
 	Args       [][]byte
 
 	isAuthed bool
-
 	resp ResponseWriter
 	buf  bytes.Buffer
 

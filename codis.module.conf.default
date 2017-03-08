@@ -1,0 +1,6 @@
+{
+    "TendInterval":3,
+    "ServerList":[
+        {"ServerAddr":"127.0.0.1:6379"}
+    ]
+}

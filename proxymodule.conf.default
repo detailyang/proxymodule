@@ -11,6 +11,12 @@
     "ModuleConfPath":"aerospike.module.conf"
 },
 {
+    "ModuleName":"codis-proxy",
+    "ProxyType":"REDIS",
+    "LocalProxyAddr":"unix:///tmp/codis-proxy.sock",
+    "ModuleConfPath":"codis.module.conf"
+},
+{
     "ModuleName":"dccproxy",
     "ProxyType":"DCC",
     "LocalProxyAddr":"127.0.0.1:8606",
