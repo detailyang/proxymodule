@@ -4,29 +4,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	. "github.com/absolute8511/proxymodule/common"
 	as "github.com/aerospike/aerospike-client-go"
 )
 
 const (
-	monitorBinuess     = "tether.kvproxy"
-	monitorApplication = "kvstore"
-	monitorCategory    = "category"
+	asMonitorBinuess  = "tether.kvproxy"
+	asMonitorApp      = "kvstore"
+	asMonitorCategory = "category"
 )
-
-var (
-	hostName = "unknown host"
-)
-
-func init() {
-	if name, err := os.Hostname(); err == nil {
-		hostName = name
-	}
-}
 
 func NewAerospikeProxyStatistics() *AerospikeProxyStatistics {
 	statisticsModule := &AerospikeProxyStatistics{
@@ -167,44 +157,6 @@ func (self *AerospikeProxyStatistics) GenMonitorData() []byte {
 }
 
 /*
-the monitor data format:
-  [
-  {
-	  "business":"tether.kvproxy",
-	  "timestamp":1456387601,
-	  "metrics":{
-		  "get":78219,
-		  "set":21763,
-		  "del":21625
-	  },
-	  "tags":{
-		  "application":"kvstore",
-		  "host":"",
-		  "category":"",
-	  },
-  }
-  ]
-*/
-
-type monitorData struct {
-	Business  string            `json:"business"`
-	Timestamp int64             `json:"timestamp"`
-	Metrics   map[string]uint64 `json:"metrics"`
-	Tags      map[string]string `json:"tags"`
-}
-
-func newMonitorData() *monitorData {
-	data := &monitorData{
-		Metrics: make(map[string]uint64),
-		Tags:    make(map[string]string),
-	}
-
-	data.Tags["application"] = monitorApplication
-	data.Tags["host"] = hostName
-	return data
-}
-
-/*
 current metrics command:
 get, del, ttl, exists, mget, set ,setex, expire
 */
@@ -294,14 +246,11 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 			}
 		}
 
-		var proxyMonitorData []*monitorData
-		timestamp := time.Now().Unix()
+		var proxyMonitorData []*MonitorData
 
 		for category, metrics := range integratedData {
-			monitorSample := newMonitorData()
-			monitorSample.Tags[monitorCategory] = category
-			monitorSample.Business = monitorBinuess
-			monitorSample.Timestamp = timestamp
+			monitorSample := NewMonitorData(asMonitorApp, asMonitorBinuess)
+			monitorSample.Tags[asMonitorCategory] = category
 
 			for cmd, count := range metrics {
 				monitorSample.Metrics[cmd] = count
@@ -311,10 +260,8 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 		}
 
 		for cost, count := range rawSlowOperation {
-			monitorSample := newMonitorData()
-			monitorSample.Tags[monitorCategory] = cost
-			monitorSample.Business = monitorBinuess
-			monitorSample.Timestamp = timestamp
+			monitorSample := NewMonitorData(asMonitorApp, asMonitorBinuess)
+			monitorSample.Tags[asMonitorCategory] = cost
 
 			monitorSample.Metrics["Slow"] = count - snapshot.slowOperation[cost]
 			snapshot.slowOperation[cost] = count
@@ -322,7 +269,7 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 		}
 
 		//the overall monitor data
-		overViewData := newMonitorData()
+		overViewData := NewMonitorData(asMonitorApp, asMonitorBinuess)
 		overViewData.Metrics["Failed"] = failedOperation - snapshot.failedOperation
 		snapshot.failedOperation = failedOperation
 		overViewData.Metrics["CostTime"] = uint64(accumulatedOpTime-snapshot.accumulatedOpTime) / 1000
@@ -334,10 +281,8 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 			overViewData.Metrics["Avg"] = overViewData.Metrics["CostTime"] / total
 		}
 
-		//overViewData.Tags[monitorCategory] = "OverView"
+		//overViewData.Tags[asMonitorCategory] = "OverView"
 
-		overViewData.Business = monitorBinuess
-		overViewData.Timestamp = timestamp
 		proxyMonitorData = append(proxyMonitorData, overViewData)
 
 		if encodedData, err := json.Marshal(proxyMonitorData); err != nil {
