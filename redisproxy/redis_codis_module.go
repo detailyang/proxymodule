@@ -2,13 +2,11 @@ package redisproxy
 
 import (
 	"encoding/json"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/proxymodule/common"
-	"github.com/garyburd/redigo/redis"
 )
 
 var (
@@ -34,11 +32,7 @@ type CodisProxyConf struct {
 type CodisProxy struct {
 	sync.Mutex
 	conf             *CodisProxyConf
-	connPool         *redis.Pool
-	ServerList       []CodisServer
-	quitC            chan struct{}
-	wg               sync.WaitGroup
-	tendServerList   []CodisServer //buffer used in method 'tendServer'
+	cluster          *CodisCluster
 	statisticsModule *CodisStatisticsModule
 }
 
@@ -65,7 +59,6 @@ func init() {
 
 func CreateCodisProxy() RedisProxyModule {
 	return &CodisProxy{
-		quitC:            make(chan struct{}),
 		statisticsModule: NewCodisStatisticsModule(),
 	}
 }
@@ -84,62 +77,19 @@ func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
 		return err
 	}
 
-	proxy.ServerList = make([]CodisServer, 0, len(proxy.conf.ServerList))
-	proxy.tendServerList = make([]CodisServer, 0, len(proxy.conf.ServerList))
-
-	//check the state of servers at init
-	proxy.tendServers()
-	if len(proxy.ServerList) == 0 {
-		redisLog.Errorf("no server is available at codis proxy start, %v", proxy.conf.ServerList)
+	if proxy.conf.TendInterval <= 0 {
+		proxy.conf.TendInterval = defaultTendInterval
 	}
 
-	var rotate int64
-	dialF := func() (redis.Conn, error) {
-
-		proxy.Mutex.Lock()
-		servLen := len(proxy.ServerList)
-		if servLen == 0 {
-			proxy.Mutex.Unlock()
-			return nil, errors.New("no server is available right now")
-		}
-		picked := (atomic.AddInt64(&rotate, 1) % int64(servLen))
-		s := proxy.ServerList[picked]
-		proxy.Mutex.Unlock()
-
-		return redis.Dial("tcp", s.ServerAddr)
-
-	}
-
-	testF := func(c redis.Conn, t time.Time) (err error) {
-		if time.Since(t) > 60*time.Second {
-			_, err = c.Do("PING")
-		}
-		return
-	}
-
-	proxy.connPool = &redis.Pool{
-		MaxIdle:      256,
-		MaxActive:    512,
-		IdleTimeout:  120 * time.Second,
-		Dial:         dialF,
-		TestOnBorrow: testF,
-	}
-
-	proxy.wg.Add(1)
-
-	go func() {
-		defer proxy.wg.Done()
-		proxy.tend()
-	}()
+	proxy.cluster = NewCodisCluster(proxy.conf.ServerList, proxy.conf.TendInterval)
 
 	return nil
 }
 
 func (proxy *CodisProxy) RegisterCmd(router *CmdRouter) {
-	commandExec := func(c *Client, resp ResponseWriter) error {
+	maxRetry := int(len(proxy.conf.ServerList)/2) + 1
 
-		conn := proxy.connPool.Get()
-		defer conn.Close()
+	commandExec := func(c *Client, resp ResponseWriter) error {
 
 		cmdArgs := make([]interface{}, len(c.Args))
 		for i, v := range c.Args {
@@ -148,12 +98,26 @@ func (proxy *CodisProxy) RegisterCmd(router *CmdRouter) {
 
 		proxy.statisticsModule.Sampling(c.cmd)
 
-		if reply, err := conn.Do(c.cmd, cmdArgs...); err != nil {
-			return err
-		} else {
-			WriteValue(resp, reply)
-			return nil
+		var reply interface{}
+		var err error
+
+		for i := 0; i < maxRetry; i++ {
+			conn, err := proxy.cluster.GetConn()
+			if err != nil {
+				redisLog.Warningf("command execute failed [%d, %s]", i, c.catGenericCommand())
+			} else {
+				if reply, err = conn.Do(c.cmd, cmdArgs...); err != nil {
+					conn.Close()
+					redisLog.Warningf("command execute failed [%d, %s]", i, c.catGenericCommand())
+				} else {
+					WriteValue(resp, reply)
+					conn.Close()
+					return nil
+				}
+			}
 		}
+
+		return err
 	}
 
 	for _, cmd := range supportedCommands {
@@ -165,56 +129,8 @@ func (proxy *CodisProxy) GetStatisticsModule() ProxyStatisticsModule {
 	return proxy.statisticsModule
 }
 
-func (proxy *CodisProxy) tend() {
-	if proxy.conf.TendInterval == 0 {
-		proxy.conf.TendInterval = defaultTendInterval
-	}
-
-	tendTicker := time.NewTicker(time.Duration(proxy.conf.TendInterval) * time.Second)
-	defer tendTicker.Stop()
-
-	for {
-		select {
-		case <-tendTicker.C:
-			proxy.tendServers()
-		case <-proxy.quitC:
-			redisLog.Debugf("tend routine for codis proxy exit")
-			return
-		}
-	}
-}
-
-func (proxy *CodisProxy) tendServers() {
-	for _, s := range proxy.conf.ServerList {
-		conn, err := redis.Dial("tcp", s.ServerAddr)
-		if err != nil {
-			redisLog.Warningf("dial to codis server failed, disable the address: %s, err: %s", s, err.Error())
-		} else {
-			if _, err = conn.Do("PING"); err != nil {
-				redisLog.Warningf("ping codis server failed, disable the address: %s, err: %s", s, err.Error())
-			} else {
-				redisLog.Debugf("codis server: %v is available", s)
-				proxy.tendServerList = append(proxy.tendServerList, s)
-			}
-			conn.Close()
-		}
-	}
-
-	if len(proxy.tendServerList) <= 0 {
-		redisLog.Errorf("no server node in serviceable state")
-	} else {
-		proxy.Mutex.Lock()
-		tmp := proxy.ServerList
-		proxy.ServerList = proxy.tendServerList
-		proxy.tendServerList = tmp[:0]
-		proxy.Mutex.Unlock()
-	}
-}
-
 func (proxy *CodisProxy) Stop() {
-	close(proxy.quitC)
-	proxy.connPool.Close()
-	proxy.wg.Wait()
+	proxy.cluster.Close()
 }
 
 func NewCodisStatisticsModule() *CodisStatisticsModule {
