@@ -1,5 +1,8 @@
 {
     "TendInterval":3,
+    "ReadTimeout":3,
+    "WriteTimeout":3,
+    "DialTimeout":3,
     "ServerList":[
         {"ServerAddr":"127.0.0.1:6379"}
     ]

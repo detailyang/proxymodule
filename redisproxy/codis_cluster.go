@@ -23,17 +23,24 @@ type CodisCluster struct {
 	tendInterval int64
 	wg           sync.WaitGroup
 	quitC        chan struct{}
+
+	dialF func(string) (redis.Conn, error)
 }
 
-func NewCodisCluster(hosts []CodisServer, TendInterval int64) *CodisCluster {
+func NewCodisCluster(conf *CodisProxyConf) *CodisCluster {
 	cluster := &CodisCluster{
 		quitC:        make(chan struct{}),
-		tendInterval: TendInterval,
-		ServerList:   make([]CodisServer, len(hosts)),
-		nodes:        make([]*CodisHost, 0, len(hosts)),
+		tendInterval: conf.TendInterval,
+		ServerList:   make([]CodisServer, len(conf.ServerList)),
+		nodes:        make([]*CodisHost, 0, len(conf.ServerList)),
 	}
 
-	copy(cluster.ServerList, hosts)
+	copy(cluster.ServerList, conf.ServerList)
+
+	cluster.dialF = func(addr string) (redis.Conn, error) {
+		return redis.DialTimeout("tcp", addr, conf.DialTimeout*time.Second,
+			conf.ReadTimeout*time.Second, conf.WriteTimeout*time.Second)
+	}
 
 	cluster.Tend()
 
@@ -58,9 +65,11 @@ func (cluster *CodisCluster) GetConn() (redis.Conn, error) {
 
 	picked := atomic.AddInt64(&cluster.rotate, 1) % int64(len(cluster.nodes))
 
-	conn := cluster.nodes[picked].connPool.Get()
+	connPool := cluster.nodes[picked].connPool
 
 	cluster.Mutex.Unlock()
+
+	conn := connPool.Get()
 
 	return conn, nil
 }
@@ -70,7 +79,7 @@ func (cluster *CodisCluster) Tend() {
 	flag := struct{}{}
 
 	for _, host := range cluster.ServerList {
-		conn, err := redis.Dial("tcp", host.ServerAddr)
+		conn, err := cluster.dialF(host.ServerAddr)
 		if err != nil {
 			redisLog.Warningf("dial to codis server failed, disable the address: %s, err: %s", host.ServerAddr, err.Error())
 		} else {
@@ -115,31 +124,28 @@ func (cluster *CodisCluster) Tend() {
 		return
 	}
 
-	dialDecorator := func(addr string) func() (redis.Conn, error) {
-		return func() (redis.Conn, error) {
-			return redis.Dial("tcp", addr)
-		}
-	}
-
+	usedLen := len(newNodes) + len(availableHosts)
 	for addr, _ := range availableHosts {
 		newNode := &CodisHost{addr: addr}
 		newNode.connPool = &redis.Pool{
-			MaxIdle:      256,
-			MaxActive:    512,
+			MaxIdle:      int(256/usedLen) + 1,
+			MaxActive:    int(512/usedLen) + 1,
 			IdleTimeout:  120 * time.Second,
 			TestOnBorrow: testF,
-			Dial:         dialDecorator(addr),
+			Dial:         func() (redis.Conn, error) { return cluster.dialF(newNode.addr) },
 		}
 		redisLog.Infof("host:%v is available and come into service", newNode.addr)
 		newNodes = append(newNodes, newNode)
 	}
 
-	cluster.Mutex.Lock()
-	cluster.nodes = newNodes
-	cluster.Mutex.Unlock()
+	if len(availableHosts) != 0 || len(delNodes) != 0 {
+		cluster.Mutex.Lock()
+		cluster.nodes = newNodes
+		cluster.Mutex.Unlock()
+	}
 
 	for _, node := range delNodes {
-		redisLog.Infof("host:%v is unavailable and deleted from cluster", node.addr)
+		redisLog.Infof("host:%s is unavailable and deleted from cluster", node.addr)
 		node.connPool.Close()
 	}
 }
@@ -156,6 +162,13 @@ func (cluster *CodisCluster) tendNodes() {
 		case <-tendTicker.C:
 			cluster.Tend()
 		case <-cluster.quitC:
+			cluster.Mutex.Lock()
+			nodes := cluster.nodes
+			cluster.nodes = []*CodisHost{}
+			cluster.Mutex.Unlock()
+			for _, node := range nodes {
+				node.connPool.Close()
+			}
 			redisLog.Debugf("go routine for tend codis cluster exit")
 			return
 		}
@@ -164,12 +177,6 @@ func (cluster *CodisCluster) tendNodes() {
 }
 
 func (cluster *CodisCluster) Close() {
-	cluster.Mutex.Lock()
-	for _, node := range cluster.nodes {
-		node.connPool.Close()
-	}
-	cluster.Mutex.Unlock()
-
 	close(cluster.quitC)
 
 	cluster.wg.Wait()

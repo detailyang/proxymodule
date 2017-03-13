@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/proxymodule/common"
+	"github.com/garyburd/redigo/redis"
 )
 
 var (
@@ -26,7 +27,11 @@ type CodisServer struct {
 
 type CodisProxyConf struct {
 	TendInterval int64
-	ServerList   []CodisServer
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	DialTimeout  time.Duration
+
+	ServerList []CodisServer
 }
 
 type CodisProxy struct {
@@ -81,7 +86,7 @@ func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
 		proxy.conf.TendInterval = defaultTendInterval
 	}
 
-	proxy.cluster = NewCodisCluster(proxy.conf.ServerList, proxy.conf.TendInterval)
+	proxy.cluster = NewCodisCluster(proxy.conf)
 
 	return nil
 }
@@ -100,15 +105,16 @@ func (proxy *CodisProxy) RegisterCmd(router *CmdRouter) {
 
 		var reply interface{}
 		var err error
+		var conn redis.Conn
 
 		for i := 0; i < maxRetry; i++ {
-			conn, err := proxy.cluster.GetConn()
+			conn, err = proxy.cluster.GetConn()
 			if err != nil {
-				redisLog.Warningf("command execute failed [%d, %s]", i, c.catGenericCommand())
+				redisLog.Warningf("command execute failed [%d, %s], err: %s", i, c.catGenericCommand(), err.Error())
 			} else {
 				if reply, err = conn.Do(c.cmd, cmdArgs...); err != nil {
 					conn.Close()
-					redisLog.Warningf("command execute failed [%d, %s]", i, c.catGenericCommand())
+					redisLog.Warningf("command execute failed [%d, %s], err: %s", i, c.catGenericCommand(), err.Error())
 				} else {
 					WriteValue(resp, reply)
 					conn.Close()
