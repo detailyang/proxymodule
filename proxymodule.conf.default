@@ -2,6 +2,10 @@
 "PidFile":"./run.pid",
 "GlogDir":"./glog",
 "ModuleLogLevel":1,
+"DccServers":"",
+"DccBackupFile":"./.dcc.cache",
+"DccTag":"proxymodule",
+"DccEnv":"dev",
 "ProxyConfList":
 [
 {

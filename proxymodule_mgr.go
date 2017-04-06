@@ -22,12 +22,16 @@ type ProxyModuleMgr struct {
 	monitorQuitC chan struct{}
 }
 
-func NewProxyModuleMgr(c []common.ProxyConf) *ProxyModuleMgr {
-	return &ProxyModuleMgr{
+func NewProxyModuleMgr(c *common.ProxyModuleConf) *ProxyModuleMgr {
+	mgr := &ProxyModuleMgr{
 		servers:      make(map[string]common.ModuleProxyServer),
-		confList:     c,
+		confList:     c.ProxyConfList,
 		monitorQuitC: make(chan struct{}),
 	}
+
+	common.GlobalControlCenter = common.NewControlCenter(c.DccServers, c.DccBackupFile, c.DccTag, c.DccEnv)
+
+	return mgr
 }
 
 func SetLogger(level int32, l common.Logger) {
@@ -42,7 +46,8 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 	defer self.Mutex.Unlock()
 
 	for _, conf := range self.confList {
-		if conf.ProxyType == "REDIS" {
+		switch conf.ProxyType {
+		case "REDIS":
 			s := redisproxy.NewRedisProxy(conf.LocalProxyAddr,
 				conf.ModuleName,
 				conf.ModuleConfPath, grace)
@@ -51,7 +56,7 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 			}
 			go s.Start()
 			self.servers[conf.ModuleName] = s
-		} else if conf.ProxyType == "DCC" {
+		case "DCC":
 			if s, err := dccproxy.NewDccProxy(conf.LocalProxyAddr,
 				conf.ModuleConfPath, grace); err != nil {
 				return err
@@ -59,7 +64,7 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 				go s.Start()
 				self.servers[conf.ModuleName] = s
 			}
-		} else {
+		default:
 			return fmt.Errorf("unknown proxy type: %v", conf.ProxyType)
 		}
 	}
@@ -70,6 +75,10 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 }
 
 func (self *ProxyModuleMgr) StopAll() {
+	if common.GlobalControlCenter != nil {
+		common.GlobalControlCenter.Close()
+	}
+
 	self.Mutex.Lock()
 	defer self.Mutex.Unlock()
 

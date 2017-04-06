@@ -17,7 +17,13 @@ type ProxyModuleConf struct {
 	PidFile        string
 	GlogDir        string
 	ModuleLogLevel int32
-	ProxyConfList  []ProxyConf
+
+	DccServers    string
+	DccBackupFile string
+	DccTag        string
+	DccEnv        string
+
+	ProxyConfList []ProxyConf
 }
 
 const (

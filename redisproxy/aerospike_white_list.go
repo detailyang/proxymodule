@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/absolute8511/proxymodule/common"
 	as "github.com/aerospike/aerospike-client-go"
 	ds "gitlab.qima-inc.com/wangjian/go-dcc-sdk"
 )
@@ -15,54 +16,36 @@ const (
 	dccKey = "whitelist.set"
 )
 
-func NewAerospikeWhiteList(serverAddrs []string, backupFile string) (*aerospikeWhiteList, error) {
-
-	dccServerAddr := serverAddrs[0]
-	for _, serverAddr := range serverAddrs[1:] {
-		dccServerAddr += "," + serverAddr
+func NewAerospikeWhiteList(cc *common.ControlCenter) (*aerospikeWhiteList, error) {
+	if cc == nil {
+		return nil, errors.New("the control center for proxy modules has not been initialized")
 	}
 
-	asWhiteList := &aerospikeWhiteList{
-		d3client:  ds.NewDccClient(dccServerAddr, backupFile, dccApp),
+	wl := &aerospikeWhiteList{
 		whiteList: make(map[string]struct{}),
 	}
 
-	dccReq := []*ds.GetRequest{&ds.GetRequest{App: dccApp, Key: dccKey}}
+	cc.Register(dccApp, dccKey, wl.Update)
 
-	if dccRsp, err := asWhiteList.d3client.Get(dccReq, asWhiteList.Update); err != nil {
-		asWhiteList.d3client.Close()
-		return nil, err
-	} else {
-		if len(dccRsp.RspList) != 1 || dccRsp.RspList[0].Type != ds.ValueTypeCombination {
-			return nil, errors.New("DCC server response format is illegal")
-		}
-		for _, v := range dccRsp.RspList[0].CombVal {
-			if v.Value == "1" {
-				redisLog.Infof("add set into white list, %s", v.Key)
-				asWhiteList.whiteList[v.Key] = struct{}{}
-			}
-		}
-	}
-
-	return asWhiteList, nil
+	return wl, nil
 }
 
 type aerospikeWhiteList struct {
-	d3client *ds.DccClient
-
 	sync.Mutex
-
 	whiteList map[string]struct{}
 }
 
-func (self *aerospikeWhiteList) Update(dccRsp *ds.Response) {
+func (self *aerospikeWhiteList) Update(e *common.CCEvent) {
+	if e.Err != nil {
+		redisLog.Errorf("white list update for aerospike failed, err: %s", e.Err.Error())
+		return
+	}
 
+	dccRsp := e.Rsp
 	if len(dccRsp.RspList) != 1 || dccRsp.RspList[0].Type != ds.ValueTypeCombination {
-		redisLog.Warningln("response format from DCC is illegal")
+		redisLog.Errorf("response format from control center is illegal")
 	} else {
-
 		updatedwhiteList := make(map[string]struct{})
-
 		for _, v := range dccRsp.RspList[0].CombVal {
 			if v.Value == "1" {
 				redisLog.Infof("add set into white list, %s", v.Key)
@@ -71,17 +54,14 @@ func (self *aerospikeWhiteList) Update(dccRsp *ds.Response) {
 		}
 
 		self.Mutex.Lock()
-		defer self.Mutex.Unlock()
-
 		self.whiteList = updatedwhiteList
-
+		self.Mutex.Unlock()
 	}
-
 }
 
 func (self *aerospikeWhiteList) AuthAccess(key *as.Key) bool {
-	self.Mutex.Lock()
 	defer self.Mutex.Unlock()
+	self.Mutex.Lock()
 
 	if len(self.whiteList) == 0 {
 		redisLog.Errorf("KVProxy access whitelist is empty, all access are authorized")
@@ -112,5 +92,4 @@ func (self *aerospikeWhiteList) GenInfoBytes() []byte {
 }
 
 func (self *aerospikeWhiteList) Stop() {
-	self.d3client.Close()
 }

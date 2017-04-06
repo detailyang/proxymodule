@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/absolute8511/proxymodule/common"
 	as "github.com/aerospike/aerospike-client-go"
 	"github.com/aerospike/aerospike-client-go/logger"
 )
@@ -100,7 +101,7 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	self.asClient.DefaultWritePolicy.Expiration = math.MaxUint32
 
 	if self.conf.UseWhiteList {
-		self.whiteList, err = NewAerospikeWhiteList(self.conf.DccServers, self.conf.WhiteListBackUp)
+		self.whiteList, err = NewAerospikeWhiteList(common.GlobalControlCenter)
 		if err != nil {
 			redisLog.Errorf("init aerospike access white list failed: %v, all access will be authorized", err)
 			self.whiteList = nil
