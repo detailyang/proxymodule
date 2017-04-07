@@ -25,8 +25,6 @@ type AerospikeRedisConf struct {
 	AerospikeServers []string
 	Timeout          int
 	UseWhiteList     bool
-	DccServers       []string
-	WhiteListBackUp  string
 }
 
 type AerospikeRedisProxy struct {

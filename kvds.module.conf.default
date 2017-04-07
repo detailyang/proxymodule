@@ -1,0 +1,16 @@
+{
+    "KVStore":[
+    {
+        "Protocol":"AEROSPIKE",
+        "Cluster":"aerospike-all",
+        "Servers":[],
+        "ModuleConfPath":"aerospike.module.conf"
+    },
+    {
+        "Protocol":"REDIS",
+        "Cluster":"codis-all",
+        "Servers":["127.0.0.1:6379"],
+        "ModuleConfPath":"codis.module.conf"
+    },
+    ]
+}
