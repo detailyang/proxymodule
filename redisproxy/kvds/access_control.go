@@ -18,8 +18,8 @@ import (
 
 const (
 	dccApp      = "KVDS"
-	dccReadKey  = "ReadRule"
-	dccWriteKey = "WriteRule"
+	dccReadKey  = "read.rule"
+	dccWriteKey = "write.rule"
 
 	gradationWildCard = "*"
 )
@@ -45,24 +45,14 @@ func init() {
 }
 
 type KeyTransfer struct {
-	Namespace  string
 	Table      string
 	PrimaryKey string
-
-	bytesPool *sync.Pool
 }
-
-//TODO
-//KeyTransfer, should transform all keys used by the commands which can operate multiple keys simultaneously
-/*
-func (transfer *KeyTransfer) Transform(key *KVDSKey) string {
-	formatStr := fmt.Sprintf("%s:%s:%s", transfer.Namespace, transfer.Table, transfer.PrimaryKey)
-	return fmt.Sprintf(formatStr, key.Namespace, key.Table, key.PrimaryKey)
-}
-*/
 
 //Transform the format of args according to the cmd
-//TODO, use a pool of byte slice to reduce the cost of GC
+//TODO
+//1.should transform all keys used by the commands which can operate multiple keys simultaneously
+//2.may use a pool of byte slice to reduce the cost of GC
 func (transfer *KeyTransfer) Transform(cmd string, args [][]byte) [][]byte {
 	defer func() {
 		if e := recover(); e != nil {
@@ -76,11 +66,9 @@ func (transfer *KeyTransfer) Transform(cmd string, args [][]byte) [][]byte {
 	}()
 
 	newArgs := make([][]byte, len(args))
-	for i, arg := range args {
-		newArgs[i] = append(newArgs[i], arg...)
-	}
+	copy(newArgs, args)
 
-	if len(transfer.Namespace) != 0 || 0 != len(transfer.Table) || len(transfer.PrimaryKey) != 0 {
+	if 0 != len(transfer.Table) || len(transfer.PrimaryKey) != 0 {
 		if _, ok := unaryCommands[cmd]; ok {
 			newArgs[0] = transfer.transferSingleKey(args[0])
 		} else if _, ok := multiCommands[cmd]; ok {
@@ -100,9 +88,6 @@ func (transfer *KeyTransfer) Transform(cmd string, args [][]byte) [][]byte {
 
 func (transfer *KeyTransfer) transferSingleKey(key []byte) []byte {
 	fields := bytes.SplitN(key, keySep, 3)
-	if len(transfer.Namespace) > 0 {
-		fields[0] = bytes.Replace([]byte(transfer.Namespace), replaceWildCard, fields[0], -1)
-	}
 	if len(transfer.Table) > 0 {
 		fields[1] = bytes.Replace([]byte(transfer.Table), replaceWildCard, fields[1], -1)
 	}
@@ -117,9 +102,13 @@ type Cluster struct {
 	KeyTransfer KeyTransfer
 }
 
+func (cluster *Cluster) Empty() bool {
+	return cluster.Name == ""
+}
+
 type RWBaseRule struct {
-	PreCluster []Cluster
-	CurCluster []Cluster
+	PreCluster Cluster
+	CurCluster Cluster
 }
 
 type WriteRule struct {
@@ -130,8 +119,7 @@ type ReadRule struct {
 	RWBaseRule
 
 	//the key of the map is designed to be the host name
-	Gradation     map[string]GradationStrategy
-	LiveMigration bool
+	Gradation map[string]GradationStrategy
 }
 
 //针对单个host的灰度策略
@@ -231,7 +219,6 @@ func (ac *AccessControl) updateRWRule(e *common.CCEvent) {
 		ac.tableWriteRule = writeRule
 		ac.Mutex.Unlock()
 	}
-
 }
 
 func (ac *AccessControl) GetReadRule(key *KVDSKey) (*RWBaseRule, error) {
@@ -239,14 +226,16 @@ func (ac *AccessControl) GetReadRule(key *KVDSKey) (*RWBaseRule, error) {
 	readRule := ac.tableReadRule
 	ac.Mutex.Unlock()
 
-	if rule, ok := readRule[key.Table]; ok {
-		if len(rule.CurCluster) == 0 && len(rule.PreCluster) == 0 {
-			return nil, fmt.Errorf("no kvds clusters used to read the table:%s", key.Table)
+	if rule, ok := readRule[ruleLookupKey(key)]; ok {
+		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
+			return nil, fmt.Errorf("no kvds clusters can be used to read the [%s, %s]",
+				key.Namespace, key.Table)
 		} else {
 			return rule.gradationFilter(), nil
 		}
 	} else {
-		return nil, fmt.Errorf("can not find read rule for table:%s", key.Table)
+		return nil, fmt.Errorf("can not find read rule for [%s, %s]",
+			key.Namespace, key.Table)
 	}
 }
 
@@ -255,13 +244,19 @@ func (ac *AccessControl) GetWriteRule(key *KVDSKey) (*RWBaseRule, error) {
 	writeRule := ac.tableWriteRule
 	ac.Mutex.Unlock()
 
-	if rule, ok := writeRule[key.Table]; ok {
-		if len(rule.CurCluster) == 0 && len(rule.PreCluster) == 0 {
-			return nil, fmt.Errorf("no kvds clusters used to write the table:%s", key.Table)
+	if rule, ok := writeRule[ruleLookupKey(key)]; ok {
+		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
+			return nil, fmt.Errorf("no kvds clusters can be used to write the table:%s of namespace:%s",
+				key.Table, key.Namespace)
 		} else {
 			return &rule.RWBaseRule, nil
 		}
 	} else {
-		return nil, fmt.Errorf("can not find write rule for table:%s", key.Table)
+		return nil, fmt.Errorf("can not find write rule for table:%s of namespace:%s",
+			key.Table, key.Namespace)
 	}
+}
+
+func ruleLookupKey(key *KVDSKey) string {
+	return key.Namespace + ":" + key.Table
 }

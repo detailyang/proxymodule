@@ -184,6 +184,14 @@ func (self *AerospikeRedisProxy) aerospikeAccessAuth(cmd string, key *as.Key, ar
 	return nil
 }
 
+func (self *AerospikeRedisProxy) CheckUsedAsKVDSModule() bool {
+	return true
+}
+
+func (self *AerospikeRedisProxy) SetUsedAsKVDSModule() error {
+	return nil
+}
+
 func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("get", self.wrapParserRedisKey(self.getCommand))
 	router.Register("del", self.wrapParserRedisKey(self.delCommand))

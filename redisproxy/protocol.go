@@ -469,3 +469,17 @@ func (resp *RespWriter) WriteCommand(cmd string, args ...interface{}) error {
 
 	return resp.Flush()
 }
+
+func (resp *RespWriter) WriteRawBytes(buf []byte) error {
+	_, err := resp.bw.Write(buf)
+	return err
+}
+
+func IsNilValue(p []byte) bool {
+	p = bytes.Split(p, []byte{'\r', '\n'})[0]
+	if len(p) == 3 && (p[0] == '*' || p[0] == '$') && p[1] == '-' && p[2] == '1' {
+		return true
+	} else {
+		return false
+	}
+}

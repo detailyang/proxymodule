@@ -22,6 +22,10 @@ var (
 	ErrKVDSKeyInvalid = errors.New("the format of the key is invalid for KVDS")
 )
 
+const (
+	KeySep = ":"
+)
+
 /*
 the supported commands:
 	"get", "mget", "setnx", "del",
@@ -87,7 +91,6 @@ func init() {
 		hashCommands[cmd] = struct{}{}
 	}
 
-	//part of commands will cause => "liveMigration"
 }
 
 func SetLogger(l *common.LevelLogger) {
@@ -101,7 +104,7 @@ type KVDSKey struct {
 }
 
 func ParseRedisKey(redisKey string) (*KVDSKey, error) {
-	fields := strings.SplitN(redisKey, ":", 3)
+	fields := strings.SplitN(redisKey, KeySep, 3)
 	if len(fields) < 3 {
 		return nil, ErrKVDSKeyInvalid
 	} else {
@@ -137,6 +140,10 @@ func (w *DummyRespWriter) WriteArray([]interface{}) error {
 }
 
 func (w *DummyRespWriter) WriteSliceArray([][]byte) error {
+	return nil
+}
+
+func (w *DummyRespWriter) WriteRawBytes([]byte) error {
 	return nil
 }
 

@@ -139,6 +139,14 @@ func (proxy *CodisProxy) Stop() {
 	proxy.cluster.Close()
 }
 
+func (proxy *CodisProxy) CheckUsedAsKVDSModule() bool {
+	return true
+}
+
+func (proxy *CodisProxy) SetUsedAsKVDSModule() error {
+	return nil
+}
+
 func NewCodisStatisticsModule() *CodisStatisticsModule {
 	return &CodisStatisticsModule{
 		statisticsData: make(map[string]uint64),

@@ -30,6 +30,7 @@ type ResponseWriter interface {
 	WriteBulk([]byte) error
 	WriteArray([]interface{}) error
 	WriteSliceArray([][]byte) error
+	WriteRawBytes(buf []byte) error
 	Flush() error
 }
 
@@ -40,8 +41,8 @@ type Client struct {
 	Args       [][]byte
 
 	isAuthed bool
-	resp ResponseWriter
-	buf  bytes.Buffer
+	resp     ResponseWriter
+	buf      bytes.Buffer
 
 	proxyStatistics ProxyStatisticsModule
 }

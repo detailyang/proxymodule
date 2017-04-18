@@ -10,7 +10,7 @@ import (
 var (
 	ErrKeyInvalid = errors.New("invalid key format for ZanRedisDB")
 
-	keySep = []byte(":")
+	KeySep = []byte(":")
 )
 
 const (
@@ -21,7 +21,7 @@ const (
 )
 
 func ParseKey(key []byte) (*zanredisdb.PKey, error) {
-	fields := bytes.SplitN(key, keySep, 3)
+	fields := bytes.SplitN(key, KeySep, 3)
 	if len(fields) != 3 {
 		return nil, ErrKeyInvalid
 	} else {

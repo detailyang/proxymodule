@@ -1,16 +1,29 @@
 {
-    "KVStore":[
-    {
-        "Protocol":"AEROSPIKE",
-        "Cluster":"aerospike-all",
-        "Servers":[],
-        "ModuleConfPath":"aerospike.module.conf"
-    },
-    {
-        "Protocol":"REDIS",
-        "Cluster":"codis-all",
-        "Servers":["127.0.0.1:6379"],
-        "ModuleConfPath":"codis.module.conf"
-    },
-    ]
+    "Namespace":{
+        "youzan":{
+            "aerospike-all":{
+                "Protocal":"AEROSPIKE",
+                "ConfPath":"./youzan/kvds.aerospike-all.module.conf"
+            },
+            "ZanRedisDB-ns1":{
+                "Protocal":"ZANREDISDB",
+                "ConfPath":"./youzan/kvds.zrdb-ns1.module.conf"
+            },
+            "ZanRedisDB-ns2":{
+                "Protocal":"ZANREDISDB",
+                "ConfPath":"./youzan/kvds.zrdb-ns2.module.conf"
+            },
+            "codis-all":{
+                "Protocal":"CODIS",
+                "ConfPath":"./youzan/kvds.codis.module.conf"
+            }
+        },
+        "shanghai":{
+            "codis-all":{
+                "Protocal":"CODIS",
+                "ConfPath":"./shanghai/kvds.codis.module.conf"
+            }
+        }
+    }
 }
+
