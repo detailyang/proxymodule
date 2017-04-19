@@ -9,6 +9,11 @@ var (
 	hostName = "unknown host"
 )
 
+type MonitorRepeater interface {
+	PushMonitorData(string, []byte) error
+	PopMonitorData(string) ([]byte, error)
+}
+
 func init() {
 	if name, err := os.Hostname(); err == nil {
 		hostName = name

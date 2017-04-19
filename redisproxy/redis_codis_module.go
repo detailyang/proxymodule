@@ -32,6 +32,9 @@ type CodisProxyConf struct {
 	DialTimeout  time.Duration
 
 	ServerList []CodisServer
+
+	MonitorApp      string
+	MonitorBusiness string
 }
 
 type CodisProxy struct {
@@ -63,9 +66,7 @@ func init() {
 }
 
 func CreateCodisProxy() RedisProxyModule {
-	return &CodisProxy{
-		statisticsModule: NewCodisStatisticsModule(),
-	}
+	return &CodisProxy{}
 }
 
 func (proxy *CodisProxy) GetProxyName() string {
@@ -77,7 +78,10 @@ func (proxy *CodisProxy) SupportedCommands() []string {
 }
 
 func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
-	proxy.conf = &CodisProxyConf{}
+	proxy.conf = &CodisProxyConf{
+		MonitorApp:      cpMonitorApp,
+		MonitorBusiness: cpMonitorBusiness,
+	}
 	if err := loadConfig(proxy.conf); err != nil {
 		return err
 	}
@@ -87,6 +91,7 @@ func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
 	}
 
 	proxy.cluster = NewCodisCluster(proxy.conf)
+	proxy.statisticsModule = NewCodisStatisticsModule(proxy.conf.MonitorApp, proxy.conf.MonitorBusiness)
 
 	return nil
 }
@@ -147,15 +152,20 @@ func (proxy *CodisProxy) SetUsedAsKVDSModule() error {
 	return nil
 }
 
-func NewCodisStatisticsModule() *CodisStatisticsModule {
+func NewCodisStatisticsModule(app, business string) *CodisStatisticsModule {
 	return &CodisStatisticsModule{
-		statisticsData: make(map[string]uint64),
-		swapData:       make(map[string]uint64),
-		slowOperation:  make(map[string]uint64),
+		monitorApp:      app,
+		monitorBusiness: business,
+		statisticsData:  make(map[string]uint64),
+		swapData:        make(map[string]uint64),
+		slowOperation:   make(map[string]uint64),
 	}
 }
 
 type CodisStatisticsModule struct {
+	monitorApp      string
+	monitorBusiness string
+
 	sync.Mutex
 	statisticsData map[string]uint64
 	swapData       map[string]uint64
@@ -211,7 +221,7 @@ func (self *CodisStatisticsModule) GenMonitorData() []byte {
 
 	var total uint64
 	for operation, count := range self.swapData {
-		opSample := common.NewMonitorData(cpMonitorApp, cpMonitorBusiness)
+		opSample := common.NewMonitorData(self.monitorApp, self.monitorBusiness)
 		opSample.Metrics["OpCount"] = count
 		opSample.Tags["Operation"] = operation
 
@@ -222,7 +232,7 @@ func (self *CodisStatisticsModule) GenMonitorData() []byte {
 		self.swapData[operation] = 0
 	}
 
-	overall := common.NewMonitorData(cpMonitorApp, cpMonitorBusiness)
+	overall := common.NewMonitorData(self.monitorApp, self.monitorBusiness)
 	overall.Metrics["Total"] = total
 
 	costTime := uint64(atomic.SwapInt64(&self.accumulatedOpTime, 0)) / 1000
@@ -238,7 +248,7 @@ func (self *CodisStatisticsModule) GenMonitorData() []byte {
 
 	self.Mutex.Lock()
 	for datum, count := range self.slowOperation {
-		slowSample := common.NewMonitorData(cpMonitorApp, cpMonitorBusiness)
+		slowSample := common.NewMonitorData(self.monitorApp, self.monitorBusiness)
 		slowSample.Metrics["SlowCount"] = count
 		slowSample.Tags["datum"] = datum
 		monitorData = append(monitorData, slowSample)

@@ -25,6 +25,8 @@ type AerospikeRedisConf struct {
 	AerospikeServers []string
 	Timeout          int
 	UseWhiteList     bool
+	MonitorApp       string
+	MonitorBusiness  string
 }
 
 type AerospikeRedisProxy struct {
@@ -38,8 +40,7 @@ type AerospikeRedisProxy struct {
 
 func CreateRedis2AerospikeProxy() RedisProxyModule {
 	return &AerospikeRedisProxy{
-		asServers:       make([]string, 0),
-		proxyStatistics: NewAerospikeProxyStatistics(),
+		asServers: make([]string, 0),
 	}
 }
 
@@ -60,7 +61,10 @@ func (self *AerospikeRedisProxy) Stop() {
 }
 
 func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
-	self.conf = &AerospikeRedisConf{}
+	self.conf = &AerospikeRedisConf{
+		MonitorApp:      asMonitorApp,
+		MonitorBusiness: asMonitorBusiness,
+	}
 	err := f(self.conf)
 	if err != nil {
 		return err
@@ -105,6 +109,8 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 			self.whiteList = nil
 		}
 	}
+
+	self.proxyStatistics = NewAerospikeProxyStatistics(self.conf.MonitorApp, self.conf.MonitorBusiness)
 
 	return nil
 }

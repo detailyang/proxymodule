@@ -13,14 +13,16 @@ import (
 )
 
 const (
-	asMonitorBinuess  = "tether.kvproxy"
+	asMonitorBusiness = "tether.kvproxy"
 	asMonitorApp      = "kvstore"
 	asMonitorCategory = "category"
 )
 
-func NewAerospikeProxyStatistics() *AerospikeProxyStatistics {
+func NewAerospikeProxyStatistics(app, business string) *AerospikeProxyStatistics {
 	statisticsModule := &AerospikeProxyStatistics{
-		statisticsData: make(map[string]map[statisticsUnit]uint64),
+		monitorApp:      app,
+		monitorBusiness: business,
+		statisticsData:  make(map[string]map[statisticsUnit]uint64),
 		slowOperation: map[string]uint64{
 			"2ms": 0, "5ms": 0, "10ms": 0, "20ms": 0,
 		},
@@ -37,6 +39,9 @@ type statisticsUnit struct {
 }
 
 type AerospikeProxyStatistics struct {
+	monitorApp      string
+	monitorBusiness string
+
 	sync.Mutex
 	statisticsData map[string]map[statisticsUnit]uint64
 
@@ -249,7 +254,7 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 		var proxyMonitorData []*MonitorData
 
 		for category, metrics := range integratedData {
-			monitorSample := NewMonitorData(asMonitorApp, asMonitorBinuess)
+			monitorSample := NewMonitorData(proxy.monitorApp, proxy.monitorBusiness)
 			monitorSample.Tags[asMonitorCategory] = category
 
 			for cmd, count := range metrics {
@@ -260,7 +265,7 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 		}
 
 		for cost, count := range rawSlowOperation {
-			monitorSample := NewMonitorData(asMonitorApp, asMonitorBinuess)
+			monitorSample := NewMonitorData(proxy.monitorApp, proxy.monitorBusiness)
 			monitorSample.Tags[asMonitorCategory] = cost
 
 			monitorSample.Metrics["Slow"] = count - snapshot.slowOperation[cost]
@@ -269,7 +274,7 @@ func wrapGenMonitorData(proxy *AerospikeProxyStatistics) (f func() []byte) {
 		}
 
 		//the overall monitor data
-		overViewData := NewMonitorData(asMonitorApp, asMonitorBinuess)
+		overViewData := NewMonitorData(proxy.monitorApp, proxy.monitorBusiness)
 		overViewData.Metrics["Failed"] = failedOperation - snapshot.failedOperation
 		snapshot.failedOperation = failedOperation
 		overViewData.Metrics["CostTime"] = uint64(accumulatedOpTime-snapshot.accumulatedOpTime) / 1000

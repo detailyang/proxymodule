@@ -19,13 +19,17 @@ type ZRDBConf struct {
 	LookupList   []string
 	Password     string
 	Namespace    []string
+
+	MonitorApp      string
+	MonitorBusiness string
 }
 
 type ZRDBProxy struct {
-	dynamically  bool
-	conf         *ZRDBConf
-	router       map[string]*zanredisdb.ZanRedisClient
-	asKVDSModule bool
+	dynamically      bool
+	conf             *ZRDBConf
+	router           map[string]*zanredisdb.ZanRedisClient
+	asKVDSModule     bool
+	statisticsModule *zrdb.StatisticsModule
 }
 
 func init() {
@@ -46,10 +50,12 @@ func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
 	zanredisdb.SetLogger(redisLog.Level(), redisLog.Logger)
 
 	proxy.conf = &ZRDBConf{
-		TendInterval: zrdb.DefaultTendInterval,
-		DialTimeout:  zrdb.DefaultDialTimeout,
-		ReadTimeout:  zrdb.DefaultReadTimeout,
-		WriteTimeout: zrdb.DefaultWriteTimeout,
+		TendInterval:    zrdb.DefaultTendInterval,
+		DialTimeout:     zrdb.DefaultDialTimeout,
+		ReadTimeout:     zrdb.DefaultReadTimeout,
+		WriteTimeout:    zrdb.DefaultWriteTimeout,
+		MonitorApp:      zrdb.DefaultMonitorApp,
+		MonitorBusiness: zrdb.DefaultMonitorBusiness,
 	}
 
 	if err := loadConfig(proxy.conf); err != nil {
@@ -69,6 +75,8 @@ func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
 		}
 	}
 
+	proxy.statisticsModule = zrdb.NewStatisticsModule(proxy.conf.MonitorApp, proxy.conf.MonitorBusiness)
+
 	return nil
 }
 
@@ -79,7 +87,7 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 }
 
 func (proxy *ZRDBProxy) GetStatisticsModule() ProxyStatisticsModule {
-	return nil
+	return proxy.statisticsModule
 }
 
 func (proxy *ZRDBProxy) Stop() {
@@ -154,6 +162,9 @@ func (proxy *ZRDBProxy) SetUsedAsKVDSModule() error {
 
 func zrdbKVCmdExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
+
+		proxy.statisticsModule.Sampling(c.cmd)
+
 		var pk *zanredisdb.PKey
 		cmdArgs := make([]interface{}, len(c.Args))
 		var err error

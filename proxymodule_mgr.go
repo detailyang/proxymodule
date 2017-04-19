@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.qima-inc.com/shiwei/TetherMonitorSDK"
-
 	"github.com/absolute8511/grace/gracenet"
 	"github.com/absolute8511/proxymodule/common"
 	"github.com/absolute8511/proxymodule/redisproxy"
@@ -20,12 +18,14 @@ type ProxyModuleMgr struct {
 	servers      map[string]common.ModuleProxyServer
 	confList     []common.ProxyConf
 	monitorQuitC chan struct{}
+	monitorRP    common.MonitorRepeater
 }
 
-func NewProxyModuleMgr(c *common.ProxyModuleConf) *ProxyModuleMgr {
+func NewProxyModuleMgr(c *common.ProxyModuleConf, monitorRP common.MonitorRepeater) *ProxyModuleMgr {
 	mgr := &ProxyModuleMgr{
 		servers:      make(map[string]common.ModuleProxyServer),
 		confList:     c.ProxyConfList,
+		monitorRP:    monitorRP,
 		monitorQuitC: make(chan struct{}),
 	}
 
@@ -69,7 +69,9 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 		}
 	}
 
-	go self.DoProxyModulesMonitor()
+	if self.monitorRP != nil {
+		go self.DoProxyModulesMonitor()
+	}
 
 	return nil
 }
@@ -105,7 +107,7 @@ func (self *ProxyModuleMgr) DoProxyModulesMonitor() {
 			self.Mutex.Lock()
 			for proxyName, proxyServer := range self.servers {
 				if statisticsData := proxyServer.ProxyStatisticsData(); statisticsData != nil && len(statisticsData) > 0 {
-					monitorsdk.AddProxyModuleMonitorData(proxyName, statisticsData)
+					self.monitorRP.PushMonitorData(proxyName, statisticsData)
 				}
 			}
 			self.Mutex.Unlock()
