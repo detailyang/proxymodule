@@ -153,7 +153,6 @@ func (self *RedisProxy) HotUpgrade() {
 }
 
 func (self *RedisProxy) ServeRedis() {
-	pool := &sync.Pool{New: func() interface{} { return NewEmptyClientRESP(self.quitChan) }}
 	connCh := make(chan net.Conn, connChannelLength)
 	pendingListeners := int64(len(self.listeners))
 
@@ -161,6 +160,7 @@ func (self *RedisProxy) ServeRedis() {
 		self.wg.Add(1)
 		go func(l net.Listener) {
 			defer func() {
+				log.Info("stop accepting connections from %s", l.Addr().String())
 				if atomic.AddInt64(&pendingListeners, -1) == 0 {
 					redisLog.Infof("all pending listeners have been stopped from accepting connections, close connCh")
 					close(connCh)
@@ -194,7 +194,7 @@ func (self *RedisProxy) ServeRedis() {
 
 				select {
 				case <-self.quitChan:
-					redisLog.Infof("process has been stoped, stop accepting connections from %s", l.Addr().String())
+					redisLog.Infof("process has been stopped, stop accepting connections from %s", l.Addr().String())
 					return
 				case <-self.hotUpgradeC:
 					redisLog.Infof("hot upgrade, process [pid: %d] stop accepting connections from %s", os.Getpid(), l.Addr().String())
@@ -205,6 +205,8 @@ func (self *RedisProxy) ServeRedis() {
 			}
 		}(l)
 	}
+
+	pool := &sync.Pool{New: func() interface{} { return NewEmptyClientRESP(self.quitChan) }}
 
 	for {
 		select {
