@@ -179,7 +179,7 @@ func zrdbKVCmdExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error 
 		} else {
 			fields := bytes.SplitN(c.Args[0], []byte(kvds.KeySep), 3)
 			if len(fields) != 3 {
-				return ErrKeyInvalid
+				return zrdb.ErrKeyInvalid
 			} else {
 				pk = zanredisdb.NewPKey(proxy.conf.Namespace[0], string(fields[1]), fields[2])
 			}
