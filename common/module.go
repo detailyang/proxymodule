@@ -5,3 +5,8 @@ type ModuleProxyServer interface {
 	Stop()
 	ProxyStatisticsData() []byte
 }
+
+type GraceModuleProxyServer interface {
+	ModuleProxyServer
+	StopGracefully() (chan struct{}, error)
+}

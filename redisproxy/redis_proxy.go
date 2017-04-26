@@ -50,7 +50,7 @@ func RegisterRedisProxyModule(name string, h RedisProxyModuleCreateFunc) {
 type RedisProxy struct {
 	laddrs      []string
 	quitChan    chan bool
-	hotUpgradeC chan struct{}
+	graceQuitC  chan struct{}
 	proxyModule RedisProxyModule
 	router      *CmdRouter
 	wg          sync.WaitGroup
@@ -73,7 +73,7 @@ func NewRedisProxy(addrs string, module string, moduleConfig string, grace *grac
 	rp := &RedisProxy{
 		laddrs:      strings.Split(addrs, ","),
 		quitChan:    make(chan bool),
-		hotUpgradeC: make(chan struct{}),
+		graceQuitC:  make(chan struct{}),
 		proxyModule: gRedisProxyModuleFactory[module](),
 		router:      NewCmdRouter(),
 		grace:       grace,
@@ -144,12 +144,38 @@ func (self *RedisProxy) Stop() {
 	redisLog.Infof("quit: wait redis proxy done: %v, address: %v", self.proxyModule.GetProxyName(), self.laddrs)
 }
 
-func (self *RedisProxy) HotUpgrade() {
-	close(self.hotUpgradeC)
-	self.wg.Wait()
+func (self *RedisProxy) StopGracefully() (chan struct{}, error) {
+	redisLog.Infof("redis proxy: %s, listened on: %v start to stop gracefully",
+		self.proxyModule.GetProxyName(), self.laddrs)
 
-	self.proxyModule.Stop()
-	redisLog.Infof("hot upgrade: wait redis proxy done: %v, address: %v", self.proxyModule.GetProxyName(), self.laddrs)
+	close(self.graceQuitC)
+
+	doneC := make(chan struct{})
+
+	go func() {
+		//use a timer to set a time threshold to wait
+		graceTimer := time.Tick(5 * time.Minute)
+		go func() {
+			select {
+			case <-graceTimer:
+				redisLog.Warningf("redis proxy: %s, wait too long to stop gracefully,"+
+					"all pending connections will be closed right now", self.proxyModule.GetProxyName())
+				close(self.quitChan)
+			case <-doneC:
+				return
+			}
+		}()
+
+		self.wg.Wait()
+		self.proxyModule.Stop()
+
+		close(doneC)
+		redisLog.Infof("stop gracefully: wait redis proxy done: %s, address: %v",
+			self.proxyModule.GetProxyName(), self.laddrs)
+
+	}()
+
+	return doneC, nil
 }
 
 func (self *RedisProxy) ServeRedis() {
@@ -160,7 +186,7 @@ func (self *RedisProxy) ServeRedis() {
 		self.wg.Add(1)
 		go func(l net.Listener) {
 			defer func() {
-				log.Info("stop accepting connections from %s", l.Addr().String())
+				redisLog.Infof("stop accepting connections from %s", l.Addr().String())
 				if atomic.AddInt64(&pendingListeners, -1) == 0 {
 					redisLog.Infof("all pending listeners have been stopped from accepting connections, close connCh")
 					close(connCh)
@@ -187,7 +213,9 @@ func (self *RedisProxy) ServeRedis() {
 				//set timeout to prevent the program from blocked forever
 				lex.SetDeadline(time.Now().Add(du))
 				if conn, err := l.Accept(); err != nil {
-					redisLog.Infof("accept at address: %s, error: %v", l.Addr().String(), err)
+					if netErr, ok := err.(net.Error); !(ok && netErr.Timeout()) {
+						redisLog.Infof("accept at address: %s, error: %v", l.Addr().String(), err)
+					}
 				} else {
 					connCh <- conn
 				}
@@ -196,8 +224,8 @@ func (self *RedisProxy) ServeRedis() {
 				case <-self.quitChan:
 					redisLog.Infof("process has been stopped, stop accepting connections from %s", l.Addr().String())
 					return
-				case <-self.hotUpgradeC:
-					redisLog.Infof("hot upgrade, process [pid: %d] stop accepting connections from %s", os.Getpid(), l.Addr().String())
+				case <-self.graceQuitC:
+					redisLog.Infof("quit gracefully, process [pid: %d] stop accepting connections from %s", os.Getpid(), l.Addr().String())
 					return
 				default:
 					continue

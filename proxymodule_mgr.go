@@ -3,6 +3,7 @@ package proxymodule
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/absolute8511/grace/gracenet"
@@ -19,6 +20,7 @@ type ProxyModuleMgr struct {
 	confList     []common.ProxyConf
 	monitorQuitC chan struct{}
 	monitorRP    common.MonitorRepeater
+	wg           *sync.WaitGroup
 }
 
 func NewProxyModuleMgr(c *common.ProxyModuleConf, monitorRP common.MonitorRepeater) *ProxyModuleMgr {
@@ -27,9 +29,11 @@ func NewProxyModuleMgr(c *common.ProxyModuleConf, monitorRP common.MonitorRepeat
 		confList:     c.ProxyConfList,
 		monitorRP:    monitorRP,
 		monitorQuitC: make(chan struct{}),
+		wg:           &sync.WaitGroup{},
 	}
 
-	common.GlobalControlCenter = common.NewControlCenter(c.DccServers, c.DccBackupFile, c.DccTag, c.DccEnv)
+	common.GlobalControlCenter = common.NewControlCenter(c.DccServers,
+		c.DccBackupFile, c.DccTag, c.DccEnv)
 
 	return mgr
 }
@@ -46,31 +50,41 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 	defer self.Mutex.Unlock()
 
 	for _, conf := range self.confList {
+		var proxyModule common.ModuleProxyServer
+		var err error
 		switch conf.ProxyType {
 		case "REDIS":
-			s := redisproxy.NewRedisProxy(conf.LocalProxyAddr,
+			proxyModule = redisproxy.NewRedisProxy(conf.LocalProxyAddr,
 				conf.ModuleName,
 				conf.ModuleConfPath, grace)
-			if s == nil {
+			if proxyModule == nil {
 				return fmt.Errorf("failed start proxy: %v", conf.ModuleName)
 			}
-			go s.Start()
-			self.servers[conf.ModuleName] = s
+			self.servers[conf.ModuleName] = proxyModule
 		case "DCC":
-			if s, err := dccproxy.NewDccProxy(conf.LocalProxyAddr,
+			if proxyModule, err = dccproxy.NewDccProxy(conf.LocalProxyAddr,
 				conf.ModuleConfPath, grace); err != nil {
 				return err
 			} else {
-				go s.Start()
-				self.servers[conf.ModuleName] = s
+				self.servers[conf.ModuleName] = proxyModule
 			}
 		default:
 			return fmt.Errorf("unknown proxy type: %v", conf.ProxyType)
 		}
+
+		self.wg.Add(1)
+		go func() {
+			defer self.wg.Done()
+			proxyModule.Start()
+		}()
 	}
 
 	if self.monitorRP != nil {
-		go self.DoProxyModulesMonitor()
+		self.wg.Add(1)
+		go func() {
+			defer self.wg.Done()
+			self.DoProxyModulesMonitor()
+		}()
 	}
 
 	return nil
@@ -80,9 +94,7 @@ func (self *ProxyModuleMgr) StopAll() {
 	if common.GlobalControlCenter != nil {
 		common.GlobalControlCenter.Close()
 	}
-
-	self.Mutex.Lock()
-	defer self.Mutex.Unlock()
+	close(self.monitorQuitC)
 
 	defer func() {
 		if proxyModuleLog != nil {
@@ -90,11 +102,67 @@ func (self *ProxyModuleMgr) StopAll() {
 		}
 	}()
 
-	close(self.monitorQuitC)
-
-	for _, s := range self.servers {
+	self.Mutex.Lock()
+	for name, s := range self.servers {
 		s.Stop()
+		delete(self.servers, name)
 	}
+	self.Mutex.Unlock()
+
+	self.wg.Wait()
+}
+
+func (self *ProxyModuleMgr) StopAllGracefully() (chan struct{}, error) {
+	if err := self.CheckGraceful(); err != nil {
+		return nil, err
+	}
+
+	self.Mutex.Lock()
+
+	total := len(self.servers)
+	var finished int32
+
+	proxyDoneCh := make(map[string]chan struct{})
+
+	for name, proxy := range self.servers {
+		graceProxy, _ := proxy.(common.GraceModuleProxyServer)
+		if doneC, err := graceProxy.StopGracefully(); err != nil {
+			self.Mutex.Unlock()
+			return nil, fmt.Errorf("proxy module:%s stop gracefully failed, err:%s", name, err.Error())
+		} else {
+			proxyDoneCh[name] = doneC
+		}
+	}
+	self.Mutex.Unlock()
+
+	finishedCh := make(chan struct{})
+
+	for name, doneC := range proxyDoneCh {
+		go func(name string, doneCh chan struct{}) {
+			select {
+			case <-doneCh:
+				if atomic.AddInt32(&finished, 1) == int32(total) {
+					close(finishedCh)
+				}
+			}
+		}(name, doneC)
+	}
+
+	return finishedCh, nil
+}
+
+//does all the proxies contained in the manager support stop gracefully
+func (self *ProxyModuleMgr) CheckGraceful() error {
+	defer self.Mutex.Unlock()
+	self.Mutex.Lock()
+
+	for name, proxy := range self.servers {
+		if _, ok := proxy.(common.GraceModuleProxyServer); !ok {
+			return fmt.Errorf("proxy module: %s does not support stop gracefully", name)
+		}
+	}
+
+	return nil
 }
 
 func (self *ProxyModuleMgr) DoProxyModulesMonitor() {
@@ -105,14 +173,14 @@ func (self *ProxyModuleMgr) DoProxyModulesMonitor() {
 		select {
 		case <-flushTicker.C:
 			self.Mutex.Lock()
-			for proxyName, proxyServer := range self.servers {
-				if statisticsData := proxyServer.ProxyStatisticsData(); statisticsData != nil && len(statisticsData) > 0 {
-					self.monitorRP.PushMonitorData(proxyName, statisticsData)
+			for name, proxy := range self.servers {
+				if data := proxy.ProxyStatisticsData(); data != nil && len(data) > 0 {
+					self.monitorRP.PushMonitorData(name, data)
 				}
 			}
 			self.Mutex.Unlock()
 		case <-self.monitorQuitC:
-			break
+			return
 		}
 	}
 }
