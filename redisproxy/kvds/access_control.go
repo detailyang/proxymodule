@@ -60,7 +60,7 @@ func (transfer *KeyTransfer) Transform(cmd string, args [][]byte) [][]byte {
 			n := runtime.Stack(buf, false)
 			buf = buf[0:n]
 			if log != nil {
-				log.Errorf("panic at transform key for command %s", cmd)
+				log.Errorf("panic at transform key for command:%s, stack:%s", cmd, string(buf))
 			}
 		}
 	}()
@@ -75,7 +75,7 @@ func (transfer *KeyTransfer) Transform(cmd string, args [][]byte) [][]byte {
 			for i, arg := range args {
 				newArgs[i] = transfer.transferSingleKey(arg)
 			}
-		} else if _, ok := hashCommands[cmd]; ok {
+		} else if _, ok := kvPairCommands[cmd]; ok {
 			if len(args)%2 == 0 {
 				for i := 0; i < len(args)/2; i++ {
 					newArgs[i*2] = transfer.transferSingleKey(args[i*2])
@@ -129,7 +129,7 @@ type GradationStrategy struct {
 
 func (self *ReadRule) gradationFilter() *RWBaseRule {
 	if len(self.Gradation) == 0 {
-		//no gradation strategy, all host read the current cluster
+		//no gradation strategy
 		return &RWBaseRule{
 			PreCluster: self.PreCluster,
 			CurCluster: self.CurCluster,
@@ -140,7 +140,7 @@ func (self *ReadRule) gradationFilter() *RWBaseRule {
 		if v, ok := self.Gradation[localHost]; ok {
 			percent = v.Percent
 		}
-		if rand.Float64() <= percent/100 {
+		if rand.Float64() < percent/100 {
 			return &RWBaseRule{
 				PreCluster: self.PreCluster,
 				CurCluster: self.CurCluster,
@@ -228,13 +228,13 @@ func (ac *AccessControl) GetReadRule(key *KVDSKey) (*RWBaseRule, error) {
 
 	if rule, ok := readRule[ruleLookupKey(key)]; ok {
 		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
-			return nil, fmt.Errorf("no kvds clusters can be used to read the [%s, %s]",
+			return nil, fmt.Errorf("no kvds clusters can be used to read table: [%s, %s]",
 				key.Namespace, key.Table)
 		} else {
 			return rule.gradationFilter(), nil
 		}
 	} else {
-		return nil, fmt.Errorf("can not find read rule for [%s, %s]",
+		return nil, fmt.Errorf("can not find read rule for table: [%s, %s]",
 			key.Namespace, key.Table)
 	}
 }
@@ -246,14 +246,14 @@ func (ac *AccessControl) GetWriteRule(key *KVDSKey) (*RWBaseRule, error) {
 
 	if rule, ok := writeRule[ruleLookupKey(key)]; ok {
 		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
-			return nil, fmt.Errorf("no kvds clusters can be used to write the table:%s of namespace:%s",
-				key.Table, key.Namespace)
+			return nil, fmt.Errorf("no kvds clusters can be used to write table: [%s, %s]",
+				key.Namespace, key.Table)
 		} else {
 			return &rule.RWBaseRule, nil
 		}
 	} else {
-		return nil, fmt.Errorf("can not find write rule for table:%s of namespace:%s",
-			key.Table, key.Namespace)
+		return nil, fmt.Errorf("can not find write rule for table: [%s, %s]",
+			key.Namespace, key.Table)
 	}
 }
 

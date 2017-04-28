@@ -13,9 +13,9 @@ var (
 	ReadCommands  map[string]struct{}
 	WriteCommands map[string]struct{}
 
-	unaryCommands map[string]struct{}
-	multiCommands map[string]struct{}
-	hashCommands  map[string]struct{}
+	unaryCommands  map[string]struct{}
+	multiCommands  map[string]struct{}
+	kvPairCommands map[string]struct{}
 )
 
 var (
@@ -26,32 +26,14 @@ const (
 	KeySep = ":"
 )
 
-/*
-the supported commands:
-	"get", "mget", "setnx", "del",
-	"set", "setex", "exists", "expire",
-	"ttl", "incr", "incrby", "decr",
-	"decrby", "hget", "hgetall", "hmget",
-	"hmset", "hset", "hdel", "hexists",
-	"hincrby", "mset", "rpush", "getset",
-	"lpush", "lrange", "llen", "lrem",
-	"zrangebyscore", "zrange", "zrevrange", "zrevrangebyscore",
-	"zcard", "zrank", "zrevrank", "sadd",
-	"srem", "sismember", "sinterstore", "sdiffstore",
-	"sinter", "sunion", "ssize", "keys",
-	"sdiff", "smembers", "spop", "scard",
-	"srandmember", "zadd", "zremrangebyscore", "zrem",
-	"zcount",
-*/
-
 func init() {
 	ReadCommands = make(map[string]struct{})
 	for _, cmd := range []string{
 		"get", "mget", "exists", "ttl", "hget",
-		"hgetall", "hmget", "hexists", "getset", "lrange", "llen",
+		"hgetall", "hmget", "hexists", "lrange", "llen",
 		"zrangebyscore", "zrange", "zrevrange", "zrevrangebyscore",
 		"zcard", "zrank", "zrevrank", "sismember",
-		"sinter", "sunion", "ssize", "keys", "sdiff", "smembers", "scard",
+		"sinter", "sunion", "sdiff", "smembers", "scard",
 		"srandmember", "zcount",
 	} {
 		ReadCommands[cmd] = struct{}{}
@@ -62,7 +44,7 @@ func init() {
 		"setnx", "del", "set", "setex", "expire",
 		"incr", "incrby", "decr", "decrby", "hmset",
 		"hset", "hdel", "hincrby", "mset", "rpush", "getset",
-		"lpush", "lrem", "sadd", "srem", "sinterstore", "sdiffstore",
+		"lpush", "lrem", "sadd", "srem", "sinterstore", "sdiffstore", "sunionstore",
 		"spop", "zadd", "zremrangebyscore", "zrem",
 	} {
 		WriteCommands[cmd] = struct{}{}
@@ -71,24 +53,30 @@ func init() {
 	//category of commands according to the usage of KeyTransfer
 	unaryCommands = make(map[string]struct{})
 	for _, cmd := range []string{
-		"get", "set", "ttl", "hget", "hset", "hgetall", "hmget", "hexists",
-		"getset",
+		"get", "set", "ttl", "hset", "hgetall", "hmget", "hexists",
+		"getset", "lrange", "llen", "zrangebyscore", "zrange", "zrevrange",
+		"zrevrangebyscore", "zcard", "zrank", "zrevrank", "sismember",
+		"smembers", "scard", "srandmember", "zcount",
+		"setnx", "setex", "expire", "incr", "incrby", "decr", "decrby",
+		"hmset", "hset", "hdel", "hincrby", "hget", "rpush", "getset",
+		"lpush", "lrem", "sadd", "srem", "spop", "zadd", "zrem", "zremrangebyscore",
 	} {
 		unaryCommands[cmd] = struct{}{}
 	}
 
 	multiCommands = make(map[string]struct{})
 	for _, cmd := range []string{
-		"exists", "mget",
+		"exists", "mget", "sinter", "sunion", "sdiff",
+		"del", "sinterstore", "sdiffstore", "sunionstore",
 	} {
 		multiCommands[cmd] = struct{}{}
 	}
 
-	hashCommands = make(map[string]struct{})
+	kvPairCommands = make(map[string]struct{})
 	for _, cmd := range []string{
 		"mset",
 	} {
-		hashCommands[cmd] = struct{}{}
+		kvPairCommands[cmd] = struct{}{}
 	}
 
 }

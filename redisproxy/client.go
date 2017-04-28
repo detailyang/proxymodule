@@ -13,7 +13,7 @@ import (
 const (
 	ConnReadBufferSize    = 1024
 	ConnWriteBufferSize   = 1024
-	ConnKeepaliveInterval = 15
+	ConnKeepaliveInterval = 90
 )
 
 var ErrEmptyCommand = errors.New("empty command")

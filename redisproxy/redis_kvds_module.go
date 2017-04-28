@@ -104,15 +104,15 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 			if kvdsProxy, ok := proxy.(KVDSRedisProxyModule); ok {
 				module.proxy = kvdsProxy
 			} else {
-				redisLog.Errorf("the RedisProxyModule for protocol:%s can not be used as KVDSRedisProxyModule")
+				redisLog.Errorf("the RedisProxyModule for protocol:%s can not be used as KVDSRedisProxyModule", conf.Protocol)
 				continue
 			}
 
 			if err := module.proxy.InitConf(func(v interface{}) error {
-				redisLog.Infof("init module config from : %s", conf.ConfPath)
+				redisLog.Infof("init kvds module [%s, %s], protocol:%s, config from : %s", ns, cluster, conf.Protocol, conf.ConfPath)
 				return common.LoadModuleConfFromFile(conf.ConfPath, v)
 			}); err != nil {
-				redisLog.Errorf("init module from:%s failed, err:%s", conf.ConfPath, err.Error())
+				redisLog.Errorf("init kvds module [%s, %s] from:%s failed, err:%s", ns, cluster, conf.ConfPath, err.Error())
 				continue
 			}
 
@@ -138,21 +138,13 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 func (self *KVDSProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("info", self.commandInfo)
 
-	router.Register("get", self.readCmdExecute)
+	for cmd, _ := range kvds.WriteCommands {
+		router.Register(cmd, self.writeCmdExecute)
+	}
 
-	router.Register("set", self.writeCmdExecute)
-	router.Register("del", self.writeCmdExecute)
-
-	/*
-		for cmd, _ := range kvds.WriteCommands {
-			router.Register(cmd, self.writeCmdExecute)
-		}
-
-		for cmd, _ := range kvds.ReadCommands {
-			router.Register(cmd, self.readCmdExecute)
-		}
-	*/
-
+	for cmd, _ := range kvds.ReadCommands {
+		router.Register(cmd, self.readCmdExecute)
+	}
 }
 
 func (self *KVDSProxy) Stop() {
@@ -189,9 +181,7 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 	//make a copy of the original command arguments in case of
 	//the key transformation used in data migration from cluster to cluster
 	cmdArgs := make([][]byte, len(c.Args))
-	for i, arg := range c.Args {
-		cmdArgs[i] = append(cmdArgs[i], arg...)
-	}
+	copy(cmdArgs, c.Args)
 
 	if cluster := rule.PreCluster; !cluster.Empty() {
 		redisLog.Debugf("kvds write data to previous cluster [%s, %s], cmd: %s",
@@ -245,7 +235,7 @@ func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
 		c.Args = cmdArgs
 	}()
 
-	if !rule.CurCluster.Empty() && !rule.PreCluster.Empty() {
+	if !rule.PreCluster.Empty() {
 		redisLog.Debugf("table [%s, %s] read current cluster [%s] and previous cluster [%s]",
 			key.Namespace, key.Table, rule.CurCluster.Name, rule.PreCluster.Name)
 
