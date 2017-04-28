@@ -126,7 +126,7 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 				if err := self.namespace[ns].AddKVModule(cluster, &module); err != nil {
 					redisLog.Errorf("add kv module:%s into namespace:%s failed as:%s", cluster, ns, err.Error())
 				} else {
-					redisLog.Errorf("kv module [%s, %s] of protocol:%s come into service", ns, cluster, conf.Protocol)
+					redisLog.Infof("kv module [%s, %s] of protocol:%s come into service", ns, cluster, conf.Protocol)
 				}
 			}
 		}
