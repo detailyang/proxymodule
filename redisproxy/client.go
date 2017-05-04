@@ -16,12 +16,14 @@ const (
 	ConnKeepaliveInterval = 90
 )
 
-var ErrEmptyCommand = errors.New("empty command")
-var ErrNotSupported = errors.New("command not supported")
-var ErrNotAuthenticated = errors.New("auth failed")
+var (
+	ErrEmptyCommand     = errors.New("empty command")
+	ErrNotSupported     = errors.New("command not supported")
+	ErrNotAuthenticated = errors.New("auth failed")
 
-var errReadRequest = errors.New("invalid request protocol")
-var errClientQuit = errors.New("remote client quit")
+	errReadRequest = errors.New("invalid request protocol")
+	errClientQuit  = errors.New("remote client quit")
+)
 
 type ResponseWriter interface {
 	WriteError(error) error
@@ -44,17 +46,36 @@ type Client struct {
 	resp     ResponseWriter
 	buf      bytes.Buffer
 
+	closeCh chan struct{}
+
 	proxyStatistics ProxyStatisticsModule
 }
 
 func newClient() *Client {
-	c := &Client{}
+	c := &Client{
+		closeCh: make(chan struct{}),
+	}
 	c.isAuthed = false
 
 	return c
 }
 
+func (c *Client) closed() bool {
+	select {
+	case <-c.closeCh:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Client) close() {
+	select {
+	case <-c.closeCh:
+		return
+	default:
+		close(c.closeCh)
+	}
 }
 
 func (c *Client) authEnabled() bool {
@@ -75,6 +96,9 @@ func (c *Client) perform() {
 		} else {
 			c.resp.WriteBulk(c.Args[0])
 		}
+	} else if c.cmd == "quit" {
+		c.resp.WriteString("OK")
+		c.close()
 	} else if exeCmd, ok := c.RegCmds.GetCmdHandler(c.cmd); !ok {
 		err = ErrNotSupported
 	} else if c.authEnabled() && !c.isAuthed && c.cmd != "auth" {
@@ -115,6 +139,7 @@ func (c *Client) perform() {
 		c.resp.WriteError(err)
 
 		fullCmd := c.catGenericCommand()
+
 		truncateLen := len(fullCmd)
 		if truncateLen > 256 {
 			truncateLen = 256
@@ -122,7 +147,9 @@ func (c *Client) perform() {
 
 		redisLog.Infof("command execute failed, detail: %s, err: %s", string(fullCmd[:truncateLen]), err.Error())
 	}
+
 	c.resp.Flush()
+
 	return
 }
 
@@ -247,6 +274,11 @@ func (c *RespClient) Run() {
 		select {
 		case <-c.quit:
 			return
+
+		case <-c.closeCh:
+			redisLog.Infof("remote client: %s  ask to quit", c.conn.RemoteAddr().String())
+			return
+
 		default:
 			if kc > 0 {
 				c.conn.SetReadDeadline(time.Now().Add(kc))
@@ -261,6 +293,7 @@ func (c *RespClient) Run() {
 			}
 
 			if err != nil {
+				redisLog.Errorf("handle request failed as err:%s, connection will be closed by server", err.Error())
 				return
 			}
 		}
