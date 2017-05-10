@@ -111,7 +111,7 @@ func (proxy *ZRDBProxy) cmdExec(cmd string, resp ResponseWriter, pk *zanredisdb.
 	}
 
 	if zrClient != nil {
-		if reply, err := zrClient.DoRedis(cmd, pk.RawKey, true, cmdArgs...); err == nil {
+		if reply, err := zrClient.DoRedis(cmd, pk.ShardingKey(), true, cmdArgs...); err == nil {
 			WriteValue(resp, reply)
 			return nil
 		} else {
