@@ -276,6 +276,7 @@ func (c *RespClient) Run() {
 			return
 
 		case <-c.closeCh:
+			c.resp.Flush()
 			redisLog.Infof("remote client: %s  ask to quit", c.conn.RemoteAddr().String())
 			return
 
