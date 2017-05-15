@@ -7,6 +7,7 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,7 +47,8 @@ type Client struct {
 	resp     ResponseWriter
 	buf      bytes.Buffer
 
-	closeCh chan struct{}
+	closeCh    chan struct{}
+	closedFlag int32
 
 	proxyStatistics ProxyStatisticsModule
 }
@@ -61,20 +63,28 @@ func newClient() *Client {
 }
 
 func (c *Client) closed() bool {
-	select {
-	case <-c.closeCh:
-		return true
-	default:
-		return false
-	}
+	return atomic.LoadInt32(&c.closedFlag) >= 1
 }
 
 func (c *Client) close() {
-	select {
-	case <-c.closeCh:
-		return
-	default:
+	if atomic.CompareAndSwapInt32(&c.closedFlag, 0, 1) {
 		close(c.closeCh)
+	}
+}
+
+//should be called before reuse the client
+func (c *Client) reset() {
+	c.isAuthed = false
+	c.cmd = ""
+	c.buf.Reset()
+	c.remoteAddr = ""
+	c.proxyStatistics = nil
+	c.Args = nil
+	c.RegCmds = nil
+
+	if c.closed() {
+		c.closeCh = make(chan struct{})
+		atomic.StoreInt32(&c.closedFlag, 0)
 	}
 }
 
@@ -276,8 +286,7 @@ func (c *RespClient) Run() {
 			return
 
 		case <-c.closeCh:
-			c.resp.Flush()
-			redisLog.Infof("remote client: %s  ask to quit", c.conn.RemoteAddr().String())
+			redisLog.Infof("remote client:%s ask to quit", c.conn.RemoteAddr().String())
 			return
 
 		default:

@@ -64,6 +64,10 @@ func SetLogger(level int32, l common.Logger) {
 	redisLog.SetLevel(level)
 }
 
+func SetLoggerLevel(level int32) {
+	redisLog.SetLevel(level)
+}
+
 func NewRedisProxy(addrs string, module string, moduleConfig string, grace *gracenet.Net) *RedisProxy {
 	if _, ok := gRedisProxyModuleFactory[module]; !ok {
 		redisLog.Errorf("redis proxy module not found: %v", module)
@@ -247,9 +251,12 @@ func (self *RedisProxy) ServeRedis() {
 
 				self.wg.Add(1)
 				go func() {
-					defer self.wg.Done()
+					defer func() {
+						client.reset() //reset must be called before reuse the client
+						pool.Put(client)
+						self.wg.Done()
+					}()
 					client.Run()
-					pool.Put(client)
 				}()
 			} else {
 				redisLog.Infoln("all listeners have been stopped, ServeRedis exit now")
