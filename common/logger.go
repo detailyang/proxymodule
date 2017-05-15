@@ -31,11 +31,11 @@ func (self *LevelLogger) SetLevel(l int32) {
 }
 
 func (self *LevelLogger) Level() int32 {
-	return self.level
+	return atomic.LoadInt32(&self.level)
 }
 
 func (self *LevelLogger) Infof(f string, args ...interface{}) {
-	if self.Logger != nil && self.level > 0 {
+	if self.Logger != nil && atomic.LoadInt32(&self.level) > 0 {
 		self.Logger.Output(2, fmt.Sprintf(f, args...))
 	}
 }
@@ -48,13 +48,13 @@ func (self *LevelLogger) Printf(f string, args ...interface{}) {
 }
 
 func (self *LevelLogger) Infoln(f string) {
-	if self.Logger != nil && self.level > 0 {
+	if self.Logger != nil && atomic.LoadInt32(&self.level) > 0 {
 		self.Logger.Output(2, f)
 	}
 }
 
 func (self *LevelLogger) Debugf(f string, args ...interface{}) {
-	if self.Logger != nil && self.level > 1 {
+	if self.Logger != nil && atomic.LoadInt32(&self.level) > 1 {
 		self.Logger.Output(2, fmt.Sprintf(f, args...))
 	}
 }

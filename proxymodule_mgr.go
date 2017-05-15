@@ -45,6 +45,11 @@ func SetLogger(level int32, l common.Logger) {
 	dccproxy.SetLogger(level, proxyModuleLog)
 }
 
+func SetLoggerLevel(level int32) {
+	redisproxy.SetLoggerLevel(level)
+	dccproxy.SetLoggerLevel(level)
+}
+
 func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 	self.Mutex.Lock()
 	defer self.Mutex.Unlock()
