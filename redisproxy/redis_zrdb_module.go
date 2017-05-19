@@ -47,7 +47,6 @@ func (proxy *ZRDBProxy) GetProxyName() string {
 }
 
 func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
-	zanredisdb.SetLogger(redisLog.Level(), redisLog.Logger)
 
 	proxy.conf = &ZRDBConf{
 		TendInterval:    zrdb.DefaultTendInterval,
@@ -81,9 +80,28 @@ func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
 }
 
 func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
-	router.Register("get", zrdbKVCmdExec(proxy))
-	router.Register("set", zrdbKVCmdExec(proxy))
-	router.Register("del", zrdbKVCmdExec(proxy))
+	router.Register("get", commandSingleKeyExec(proxy))
+	router.Register("set", commandSingleKeyExec(proxy))
+	router.Register("del", commandSingleKeyExec(proxy))
+
+	for _, hashCmd := range zrdb.HashCmds {
+		router.Register(hashCmd, commandSingleKeyExec(proxy))
+	}
+
+	//register list commands
+	for _, listCmd := range zrdb.ListCmds {
+		router.Register(listCmd, commandSingleKeyExec(proxy))
+	}
+
+	//register set commands
+	for _, setCmd := range zrdb.SetCmds {
+		router.Register(setCmd, commandSingleKeyExec(proxy))
+	}
+
+	//register zset commands
+	for _, zsetCmd := range zrdb.ZSetCmds {
+		router.Register(zsetCmd, commandSingleKeyExec(proxy))
+	}
 }
 
 func (proxy *ZRDBProxy) GetStatisticsModule() ProxyStatisticsModule {
@@ -160,11 +178,9 @@ func (proxy *ZRDBProxy) SetUsedAsKVDSModule() error {
 	}
 }
 
-func zrdbKVCmdExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
+func commandSingleKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
-
 		proxy.statisticsModule.Sampling(c.cmd)
-
 		var pk *zanredisdb.PKey
 		cmdArgs := make([]interface{}, len(c.Args))
 		var err error
@@ -188,7 +204,9 @@ func zrdbKVCmdExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error 
 				cmdArgs[i+1] = v
 			}
 		}
-
 		return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
 	}
 }
+
+//func commandMultiKeyExec(proxy *ZRDBConf) func(c *Client, resp ResponseWriter) error {
+//}

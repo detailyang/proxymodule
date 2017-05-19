@@ -35,6 +35,9 @@ func init() {
 		"zcard", "zrank", "zrevrank", "sismember",
 		"sinter", "sunion", "sdiff", "smembers", "scard",
 		"srandmember", "zcount",
+
+		"hkeys", "hlen", "lindex", "zscore", "zlexcount",
+		"zrangebylex",
 	} {
 		ReadCommands[cmd] = struct{}{}
 	}
@@ -46,6 +49,9 @@ func init() {
 		"hset", "hdel", "hincrby", "mset", "rpush", "getset",
 		"lpush", "lrem", "sadd", "srem", "sinterstore", "sdiffstore", "sunionstore",
 		"spop", "zadd", "zremrangebyscore", "zrem",
+
+		"hclear", "lpop", "lset", "ltrim", "rpop", "lclear", "sclear", "smclear",
+		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
 	} {
 		WriteCommands[cmd] = struct{}{}
 	}
@@ -60,6 +66,11 @@ func init() {
 		"setnx", "setex", "expire", "incr", "incrby", "decr", "decrby",
 		"hmset", "hset", "hdel", "hincrby", "hget", "rpush", "getset",
 		"lpush", "lrem", "sadd", "srem", "spop", "zadd", "zrem", "zremrangebyscore",
+
+		"hkeys", "hlen", "lindex", "zscore", "zlexcount",
+		"zrangebylex",
+		"hclear", "lpop", "lset", "ltrim", "rpop", "lclear", "sclear", "smclear",
+		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
 	} {
 		unaryCommands[cmd] = struct{}{}
 	}

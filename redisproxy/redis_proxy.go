@@ -10,6 +10,7 @@ import (
 
 	"github.com/absolute8511/grace/gracenet"
 	"github.com/absolute8511/proxymodule/common"
+	"github.com/wangjian-pg/go-zanredisdb"
 )
 
 const (
@@ -66,6 +67,8 @@ func SetLogger(level int32, l common.Logger) {
 
 func SetLoggerLevel(level int32) {
 	redisLog.SetLevel(level)
+
+	zanredisdb.SetLogger(redisLog.Level(), redisLog.Logger)
 }
 
 func NewRedisProxy(addrs string, module string, moduleConfig string, grace *gracenet.Net) *RedisProxy {

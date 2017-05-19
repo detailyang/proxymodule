@@ -11,6 +11,27 @@ var (
 	ErrKeyInvalid = errors.New("invalid key format for ZanRedisDB")
 
 	KeySep = []byte(":")
+
+	HashCmds = []string{
+		"hget", "hgetall", "hkeys", "hexists", "hmget",
+		"hlen", "hset", "hmset", "hdel", "hincrby", "hclear",
+	}
+
+	ListCmds = []string{
+		"lindex", "llen", "lrange", "lpop", "lset",
+		"lpush", "ltrim", "rpop", "rpush", "lclear",
+	}
+	SetCmds = []string{
+		"scard", "sismember", "smembers",
+		"sadd", "srem", "sclear", "smclear",
+	}
+
+	ZSetCmds = []string{
+		"zscore", "zcount", "zcard", "zlexcount", "zrange",
+		"zrevrange", "zrangebylex", "zrangebyscore", "zrevrangebyscore",
+		"zrank", "zrevrank", "zadd", "zincrby", "zrem", "zremrangebyrank",
+		"zremrangebyscore", "zremrangebylex", "zclear",
+	}
 )
 
 const (
