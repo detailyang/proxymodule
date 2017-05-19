@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"io"
 	"net"
 	"runtime"
 	"strings"
@@ -300,9 +301,10 @@ func (c *RespClient) Run() {
 			reqData, err := c.respReader.ParseRequest()
 			if err == nil {
 				err = c.handleRequest(reqData)
-			}
-
-			if err != nil {
+			} else if err == io.EOF {
+				redisLog.Infof("encounter EOF while handling request, connection has been closed, remote:%s", c.remoteAddr)
+				return
+			} else {
 				redisLog.Errorf("handle request failed as err:%s, connection will be closed by server", err.Error())
 				return
 			}
