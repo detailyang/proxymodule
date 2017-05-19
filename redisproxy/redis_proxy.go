@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/absolute8511/go-zanredisdb"
 	"github.com/absolute8511/grace/gracenet"
 	"github.com/absolute8511/proxymodule/common"
-	"github.com/wangjian-pg/go-zanredisdb"
 )
 
 const (
