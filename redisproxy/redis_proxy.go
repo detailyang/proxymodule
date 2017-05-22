@@ -63,6 +63,8 @@ type RedisProxy struct {
 func SetLogger(level int32, l common.Logger) {
 	redisLog.Logger = l
 	redisLog.SetLevel(level)
+
+	zanredisdb.SetLogger(redisLog.Level(), redisLog.Logger)
 }
 
 func SetLoggerLevel(level int32) {
