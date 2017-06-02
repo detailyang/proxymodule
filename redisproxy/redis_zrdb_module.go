@@ -83,6 +83,13 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("get", commandSingleKeyExec(proxy))
 	router.Register("set", commandSingleKeyExec(proxy))
 	router.Register("del", commandSingleKeyExec(proxy))
+	router.Register("expire", commandSingleKeyExec(proxy))
+	router.Register("ttl", commandSingleKeyExec(proxy))
+	router.Register("persist", commandSingleKeyExec(proxy))
+	router.Register("setex", commandSingleKeyExec(proxy))
+	router.Register("setnx", commandSingleKeyExec(proxy))
+	router.Register("exists", commandMultiKeyExec(proxy))
+	router.Register("mset", commandMultiKVExec(proxy))
 
 	for _, hashCmd := range zrdb.HashCmds {
 		router.Register(hashCmd, commandSingleKeyExec(proxy))
@@ -102,6 +109,7 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 	for _, zsetCmd := range zrdb.ZSetCmds {
 		router.Register(zsetCmd, commandSingleKeyExec(proxy))
 	}
+
 }
 
 func (proxy *ZRDBProxy) GetStatisticsModule() ProxyStatisticsModule {
@@ -208,5 +216,71 @@ func commandSingleKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter)
 	}
 }
 
-//func commandMultiKeyExec(proxy *ZRDBConf) func(c *Client, resp ResponseWriter) error {
-//}
+//exists, delete
+func commandMultiKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
+	return func(c *Client, resp ResponseWriter) error {
+		proxy.statisticsModule.Sampling(c.cmd)
+		cmdArgs := make([]interface{}, len(c.Args))
+
+		if !proxy.asKVDSModule {
+			for i, rawKey := range c.Args {
+				if _, err := zrdb.ParseKey(rawKey); err != nil {
+					return err
+				}
+				cmdArgs[i] = rawKey
+			}
+		} else {
+			ns := proxy.conf.Namespace[0]
+			for i, rawKey := range c.Args {
+				fields := bytes.SplitN(rawKey, []byte(kvds.KeySep), 3)
+				if len(fields) != 3 {
+					return zrdb.ErrKeyInvalid
+				}
+				tmpPK := zanredisdb.NewPKey(ns, string(fields[1]), fields[2])
+				cmdArgs[i] = tmpPK.RawKey
+			}
+		}
+
+		if pk, err := zrdb.ParseKey(cmdArgs[0].([]byte)); err != nil {
+			return err
+		} else {
+			return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
+		}
+	}
+}
+
+//mset
+func commandMultiKVExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
+	return func(c *Client, resp ResponseWriter) error {
+		proxy.statisticsModule.Sampling(c.cmd)
+
+		if len(c.Args)%2 != 0 {
+			return ErrCmdParams
+		}
+
+		cmdArgs := make([]interface{}, len(c.Args))
+		if proxy.asKVDSModule {
+			ns := proxy.conf.Namespace[0]
+			for i, j := 0, 1; i < len(c.Args) && j < len(c.Args); i, j = i+2, j+2 {
+				fields := bytes.SplitN(c.Args[i], []byte(kvds.KeySep), 3)
+				if len(fields) != 3 {
+					return zrdb.ErrKeyInvalid
+				}
+				tmpPK := zanredisdb.NewPKey(ns, string(fields[1]), fields[2])
+				cmdArgs[i] = tmpPK.RawKey
+				cmdArgs[j] = c.Args[j]
+			}
+		} else {
+			for i, rawArg := range c.Args {
+				cmdArgs[i] = rawArg
+			}
+		}
+
+		if pk, err := zrdb.ParseKey(cmdArgs[0].([]byte)); err != nil {
+			return err
+		} else {
+			return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
+		}
+	}
+
+}

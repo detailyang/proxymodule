@@ -15,15 +15,18 @@ var (
 	HashCmds = []string{
 		"hget", "hgetall", "hkeys", "hexists", "hmget",
 		"hlen", "hset", "hmset", "hdel", "hincrby", "hclear",
+		"hexpire", "httl", "hpersist",
 	}
 
 	ListCmds = []string{
 		"lindex", "llen", "lrange", "lpop", "lset",
 		"lpush", "ltrim", "rpop", "rpush", "lclear",
+		"lexpire", "lttl", "lpersist",
 	}
 	SetCmds = []string{
 		"scard", "sismember", "smembers",
 		"sadd", "srem", "sclear", "smclear",
+		"sexpire", "sttl", "spersist",
 	}
 
 	ZSetCmds = []string{
@@ -31,6 +34,7 @@ var (
 		"zrevrange", "zrangebylex", "zrangebyscore", "zrevrangebyscore",
 		"zrank", "zrevrank", "zadd", "zincrby", "zrem", "zremrangebyrank",
 		"zremrangebyscore", "zremrangebylex", "zclear",
+		"zexpire", "zttl", "zpersist",
 	}
 )
 
