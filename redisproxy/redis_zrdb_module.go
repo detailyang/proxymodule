@@ -189,12 +189,15 @@ func (proxy *ZRDBProxy) SetUsedAsKVDSModule() error {
 func commandSingleKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
 		proxy.statisticsModule.Sampling(c.cmd)
+		if len(c.Args) == 0 {
+			return ErrCmdParams
+		}
+
 		var pk *zanredisdb.PKey
 		cmdArgs := make([]interface{}, len(c.Args))
 		var err error
 		if !proxy.asKVDSModule {
-			pk, err = zrdb.ParseKey(c.Args[0])
-			if err != nil {
+			if pk, err = zrdb.ParseKey(c.Args[0]); err != nil {
 				return err
 			}
 			for i, v := range c.Args {
@@ -220,8 +223,11 @@ func commandSingleKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter)
 func commandMultiKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
 		proxy.statisticsModule.Sampling(c.cmd)
-		cmdArgs := make([]interface{}, len(c.Args))
 
+		if len(c.Args) == 0 {
+			return ErrCmdParams
+		}
+		cmdArgs := make([]interface{}, len(c.Args))
 		if !proxy.asKVDSModule {
 			for i, rawKey := range c.Args {
 				if _, err := zrdb.ParseKey(rawKey); err != nil {
@@ -254,7 +260,7 @@ func commandMultiKVExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) e
 	return func(c *Client, resp ResponseWriter) error {
 		proxy.statisticsModule.Sampling(c.cmd)
 
-		if len(c.Args)%2 != 0 {
+		if len(c.Args)%2 != 0 || len(c.Args) == 0 {
 			return ErrCmdParams
 		}
 
@@ -271,6 +277,11 @@ func commandMultiKVExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) e
 				cmdArgs[j] = c.Args[j]
 			}
 		} else {
+			for i := 0; i < len(c.Args); i += 2 {
+				if _, err := zrdb.ParseKey(c.Args[i]); err != nil {
+					return err
+				}
+			}
 			for i, rawArg := range c.Args {
 				cmdArgs[i] = rawArg
 			}

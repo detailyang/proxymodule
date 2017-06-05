@@ -160,6 +160,10 @@ func (kvds *KVDSProxy) GetStatisticsModule() ProxyStatisticsModule {
 }
 
 func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
+	if len(c.Args) == 0 {
+		return ErrCmdParams
+	}
+
 	key, err := kvds.ParseRedisKey(string(c.Args[0]))
 	if err != nil {
 		return err
@@ -198,6 +202,7 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 	}
 
 	redisLog.Debugf("kvds write data to current cluster [%s, %s], cmd: %s", key.Namespace, key.Table, string(c.catGenericCommand()))
+
 	c.Args = rule.CurCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
 	if err = self.doCommand(key.Namespace, rule.CurCluster.Name, c, resp); err != nil {
 		redisLog.Errorf("do write command failed at current cluster [%s, %s], err:%s", key.Namespace, rule.CurCluster.Name, err.Error())
@@ -208,6 +213,10 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 }
 
 func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
+	if len(c.Args) == 0 {
+		return ErrCmdParams
+	}
+
 	key, err := kvds.ParseRedisKey(string(c.Args[0]))
 	if err != nil {
 		return err
