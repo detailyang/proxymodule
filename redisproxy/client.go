@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -306,6 +307,9 @@ func (c *RespClient) Run() {
 				return
 			} else if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				redisLog.Infof("encounter IO time-out while handling request, connection will been closed, remote:%s", c.remoteAddr)
+				return
+			} else if operr, ok := err.(*net.OpError); ok && operr.Err.Error() == syscall.ECONNRESET.Error() {
+				redisLog.Infof("connection reset by peer while handling request, remote:%s", c.remoteAddr)
 				return
 			} else {
 				redisLog.Errorf("handle request failed as err:%s, connection will be closed by server", err.Error())
