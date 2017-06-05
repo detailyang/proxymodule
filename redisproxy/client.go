@@ -304,6 +304,9 @@ func (c *RespClient) Run() {
 			} else if err == io.EOF {
 				redisLog.Infof("encounter EOF while handling request, connection has been closed, remote:%s", c.remoteAddr)
 				return
+			} else if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+				redisLog.Infof("encounter IO time-out while handling request, connection will been closed, remote:%s", c.remoteAddr)
+				return
 			} else {
 				redisLog.Errorf("handle request failed as err:%s, connection will be closed by server", err.Error())
 				return
