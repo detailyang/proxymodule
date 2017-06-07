@@ -286,7 +286,7 @@ func (c *RespClient) Run() {
 			return
 
 		case <-c.closeCh:
-			redisLog.Infof("remote client:%s ask to quit", c.conn.RemoteAddr().String())
+			redisLog.Debugf("remote client:%s ask to quit", c.conn.RemoteAddr().String())
 			return
 
 		default:
@@ -301,7 +301,7 @@ func (c *RespClient) Run() {
 			if err == nil {
 				err = c.handleRequest(reqData)
 			} else {
-				redisLog.Infof("handle request failed as err:%s, connection will be closed by server", err.Error())
+				redisLog.Debugf("handle request failed as err:%s, connection will be closed by server", err.Error())
 				return
 			}
 		}

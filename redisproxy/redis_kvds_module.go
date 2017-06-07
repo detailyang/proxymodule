@@ -259,7 +259,7 @@ func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
 		} else {
 			respBuf.Flush()
 			if IsNilValue(buf.Bytes()) {
-				redisLog.Infof("read [%s, %s] from current cluster:%s return empty, fall back to read previous cluster:%s",
+				redisLog.Debugf("read [%s, %s] from current cluster:%s return empty, fall back to read previous cluster:%s",
 					key.Namespace, key.Table, rule.CurCluster.Name, rule.PreCluster.Name)
 			} else {
 				resp.WriteRawBytes(buf.Bytes())
