@@ -43,6 +43,9 @@ const (
 	DefaultReadTimeout  = 1
 	DefaultWriteTimeout = 1
 	DefaultDialTimeout  = 2
+
+	DefaultMaxActiveConn = 256
+	DefaultIdleTimeout   = 120
 )
 
 func ParseKey(key []byte) (*zanredisdb.PKey, error) {
