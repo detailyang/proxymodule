@@ -8,6 +8,7 @@ import (
 
 	"github.com/absolute8511/go-zanredisdb"
 	"github.com/absolute8511/proxymodule/redisproxy/kvds"
+	"github.com/absolute8511/proxymodule/redisproxy/stats"
 	"github.com/absolute8511/proxymodule/redisproxy/zrdb"
 )
 
@@ -19,17 +20,14 @@ type ZRDBConf struct {
 	LookupList   []string
 	Password     string
 	Namespace    []string
-
-	MonitorApp      string
-	MonitorBusiness string
 }
 
 type ZRDBProxy struct {
-	dynamically      bool
-	conf             *ZRDBConf
-	router           map[string]*zanredisdb.ZanRedisClient
-	asKVDSModule     bool
-	statisticsModule *zrdb.StatisticsModule
+	stats.ModuleStats
+	dynamically  bool
+	conf         *ZRDBConf
+	router       map[string]*zanredisdb.ZanRedisClient
+	asKVDSModule bool
 }
 
 func init() {
@@ -38,7 +36,8 @@ func init() {
 
 func CreateZRDBProxy() RedisProxyModule {
 	return &ZRDBProxy{
-		router: make(map[string]*zanredisdb.ZanRedisClient),
+		router:      make(map[string]*zanredisdb.ZanRedisClient),
+		ModuleStats: stats.NewProxyModuleStats(),
 	}
 }
 
@@ -49,12 +48,10 @@ func (proxy *ZRDBProxy) GetProxyName() string {
 func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
 
 	proxy.conf = &ZRDBConf{
-		TendInterval:    zrdb.DefaultTendInterval,
-		DialTimeout:     zrdb.DefaultDialTimeout,
-		ReadTimeout:     zrdb.DefaultReadTimeout,
-		WriteTimeout:    zrdb.DefaultWriteTimeout,
-		MonitorApp:      zrdb.DefaultMonitorApp,
-		MonitorBusiness: zrdb.DefaultMonitorBusiness,
+		TendInterval: zrdb.DefaultTendInterval,
+		DialTimeout:  zrdb.DefaultDialTimeout,
+		ReadTimeout:  zrdb.DefaultReadTimeout,
+		WriteTimeout: zrdb.DefaultWriteTimeout,
 	}
 
 	if err := loadConfig(proxy.conf); err != nil {
@@ -74,7 +71,7 @@ func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
 		}
 	}
 
-	proxy.statisticsModule = zrdb.NewStatisticsModule(proxy.conf.MonitorApp, proxy.conf.MonitorBusiness)
+	proxy.ModuleStats = stats.NewProxyModuleStats()
 
 	return nil
 }
@@ -112,8 +109,8 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 
 }
 
-func (proxy *ZRDBProxy) GetStatisticsModule() ProxyStatisticsModule {
-	return proxy.statisticsModule
+func (proxy *ZRDBProxy) GetStats() stats.ModuleStats {
+	return proxy.ModuleStats
 }
 
 func (proxy *ZRDBProxy) Stop() {
@@ -137,6 +134,7 @@ func (proxy *ZRDBProxy) cmdExec(cmd string, resp ResponseWriter, pk *zanredisdb.
 	}
 
 	if zrClient != nil {
+		proxy.UpdateStats(cmd, convZKey2Table(pk), 1)
 		if reply, err := zrClient.DoRedis(cmd, pk.ShardingKey(), true, cmdArgs...); err == nil {
 			WriteValue(resp, reply)
 			return nil
@@ -188,11 +186,9 @@ func (proxy *ZRDBProxy) SetUsedAsKVDSModule() error {
 
 func commandSingleKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
-		proxy.statisticsModule.Sampling(c.cmd)
 		if len(c.Args) == 0 {
 			return ErrCmdParams
 		}
-
 		var pk *zanredisdb.PKey
 		cmdArgs := make([]interface{}, len(c.Args))
 		var err error
@@ -222,8 +218,6 @@ func commandSingleKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter)
 //exists, delete
 func commandMultiKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
-		proxy.statisticsModule.Sampling(c.cmd)
-
 		if len(c.Args) == 0 {
 			return ErrCmdParams
 		}
@@ -258,12 +252,9 @@ func commandMultiKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) 
 //mset
 func commandMultiKVExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
-		proxy.statisticsModule.Sampling(c.cmd)
-
 		if len(c.Args)%2 != 0 || len(c.Args) == 0 {
 			return ErrCmdParams
 		}
-
 		cmdArgs := make([]interface{}, len(c.Args))
 		if proxy.asKVDSModule {
 			ns := proxy.conf.Namespace[0]
@@ -293,5 +284,8 @@ func commandMultiKVExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) e
 			return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
 		}
 	}
+}
 
+func convZKey2Table(key *zanredisdb.PKey) string {
+	return key.Namespace + ":" + key.Set
 }

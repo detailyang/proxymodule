@@ -238,7 +238,7 @@ func (self *AerospikeRedisProxy) ttlCommand(c *Client, key *as.Key, w ResponseWr
 func (self *AerospikeRedisProxy) infoCommand(c *Client, w ResponseWriter) error {
 	var info bytes.Buffer
 
-	info.Write(self.proxyStatistics.GenInfoBytes())
+	info.WriteString(self.ModuleStats.String())
 
 	if self.whiteList != nil {
 		info.WriteString("\r\n")

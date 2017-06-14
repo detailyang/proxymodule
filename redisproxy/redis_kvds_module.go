@@ -7,6 +7,7 @@ import (
 
 	"github.com/absolute8511/proxymodule/common"
 	"github.com/absolute8511/proxymodule/redisproxy/kvds"
+	"github.com/absolute8511/proxymodule/redisproxy/stats"
 )
 
 type KVDSRedisProxyModule interface {
@@ -42,6 +43,8 @@ func (clusters KVClusters) GetKVModule(name string) (*KVModule, bool) {
 }
 
 type KVDSProxy struct {
+	stats.ModuleStats
+
 	conf      *kvds.Conf
 	namespace map[string]KVClusters
 	ac        *kvds.AccessControl
@@ -53,7 +56,8 @@ func init() {
 
 func NewKVDSProxy() RedisProxyModule {
 	return &KVDSProxy{
-		namespace: make(map[string]KVClusters),
+		namespace:   make(map[string]KVClusters),
+		ModuleStats: kvds.NewStats(),
 	}
 }
 
@@ -126,6 +130,7 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 				if err := self.namespace[ns].AddKVModule(cluster, &module); err != nil {
 					redisLog.Errorf("add kv module:%s into namespace:%s failed as:%s", cluster, ns, err.Error())
 				} else {
+					self.ModuleStats.(*kvds.Stats).AddMemStats(cluster, module.proxy.GetStats())
 					redisLog.Infof("kv module [%s, %s] of protocol:%s come into service", ns, cluster, conf.Protocol)
 				}
 			}
@@ -155,8 +160,8 @@ func (self *KVDSProxy) Stop() {
 	}
 }
 
-func (kvds *KVDSProxy) GetStatisticsModule() ProxyStatisticsModule {
-	return nil
+func (self *KVDSProxy) GetStats() stats.ModuleStats {
+	return self.ModuleStats
 }
 
 func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
@@ -181,6 +186,8 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 	if rule.CurCluster.Empty() {
 		return fmt.Errorf("the current cluster used to write [%s, %s] is empty", key.Namespace, key.Table)
 	}
+
+	self.ModuleStats.UpdateStats(c.cmd, convKVDSKey2Table(key), 1)
 
 	//make a copy of the original command arguments in case of
 	//the key transformation used in data migration from cluster to cluster
@@ -235,6 +242,8 @@ func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
 		return fmt.Errorf("the current cluster used to read [%s, %s] is empty",
 			key.Namespace, key.Table)
 	}
+
+	self.ModuleStats.UpdateStats(c.cmd, convKVDSKey2Table(key), 1)
 
 	cmdArgs := make([][]byte, len(c.Args))
 	copy(cmdArgs, c.Args)
@@ -304,7 +313,7 @@ func (self *KVDSProxy) commandInfo(c *Client, resp ResponseWriter) error {
 					rawData := bytes.SplitN(buf.Bytes(), respTerm, 2)
 					if len(rawData) == 2 {
 						info.WriteString("#Info:\r\n")
-						info.Write(rawData[1])
+						info.Write(bytes.TrimRight(rawData[1], "\r\n"))
 					}
 				}
 				buf.Reset()
@@ -314,6 +323,7 @@ func (self *KVDSProxy) commandInfo(c *Client, resp ResponseWriter) error {
 		}
 	}
 
+	info.WriteString(self.ModuleStats.String())
 	resp.WriteBulk(info.Bytes())
 
 	return nil
@@ -330,4 +340,8 @@ func (self *KVDSProxy) doCommand(ns string, cluster string, c *Client, resp Resp
 	} else {
 		return cmdHandler(c, resp)
 	}
+}
+
+func convKVDSKey2Table(key *kvds.KVDSKey) string {
+	return key.Namespace + ":" + key.Table
 }

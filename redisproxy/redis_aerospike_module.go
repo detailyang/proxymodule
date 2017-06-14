@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/proxymodule/common"
+	"github.com/absolute8511/proxymodule/redisproxy/stats"
 	as "github.com/aerospike/aerospike-client-go"
 	"github.com/aerospike/aerospike-client-go/logger"
 )
@@ -24,18 +25,18 @@ var (
 type AerospikeRedisConf struct {
 	AerospikeServers []string
 	Timeout          int
-	UseWhiteList     bool
-	MonitorApp       string
-	MonitorBusiness  string
+	//MaxRetries       int64
+	UseWhiteList bool
 }
 
 type AerospikeRedisProxy struct {
 	sync.RWMutex
-	asClient        *as.Client
-	asServers       []string
-	conf            *AerospikeRedisConf
-	proxyStatistics *AerospikeProxyStatistics
-	whiteList       *aerospikeWhiteList
+	stats.ModuleStats
+
+	asClient  *as.Client
+	asServers []string
+	conf      *AerospikeRedisConf
+	whiteList *aerospikeWhiteList
 }
 
 func CreateRedis2AerospikeProxy() RedisProxyModule {
@@ -61,10 +62,7 @@ func (self *AerospikeRedisProxy) Stop() {
 }
 
 func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
-	self.conf = &AerospikeRedisConf{
-		MonitorApp:      asMonitorApp,
-		MonitorBusiness: asMonitorBusiness,
-	}
+	self.conf = &AerospikeRedisConf{}
 	err := f(self.conf)
 	if err != nil {
 		return err
@@ -100,6 +98,7 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 	}
 	self.asClient.DefaultPolicy.Timeout = time.Second * time.Duration(int64(self.conf.Timeout))
 	self.asClient.DefaultWritePolicy.SendKey = true
+	//self.asClient.MaxRetries = self.conf.MaxRetries
 	self.asClient.DefaultWritePolicy.Expiration = math.MaxUint32
 
 	if self.conf.UseWhiteList {
@@ -110,13 +109,13 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 		}
 	}
 
-	self.proxyStatistics = NewAerospikeProxyStatistics(self.conf.MonitorApp, self.conf.MonitorBusiness)
+	self.ModuleStats = stats.NewProxyModuleStats()
 
 	return nil
 }
 
-func (self *AerospikeRedisProxy) GetStatisticsModule() ProxyStatisticsModule {
-	return self.proxyStatistics
+func (self *AerospikeRedisProxy) GetStats() stats.ModuleStats {
+	return self.ModuleStats
 }
 
 func (self *AerospikeRedisProxy) wrapParserRedisKey(f AsCommandFunc) CommandFunc {
@@ -136,7 +135,8 @@ func (self *AerospikeRedisProxy) wrapParserRedisKey(f AsCommandFunc) CommandFunc
 			ArgEx = nil
 		}
 
-		self.proxyStatistics.Statistic(c.cmd, k, ArgEx)
+		//TODO, update stats for multiple key operating commands
+		self.UpdateStats(c.cmd, convAsKey2Table(k), 1)
 
 		if err := self.aerospikeAccessAuth(c.cmd, k, ArgEx); err != nil {
 			return err
@@ -156,7 +156,7 @@ func (self *AerospikeRedisProxy) wrapParserRedisKeyAndField(f AsCommandFuncWithB
 			return err
 		}
 
-		self.proxyStatistics.Statistic(c.cmd, k, nil)
+		self.UpdateStats(c.cmd, convAsKey2Table(k), 1)
 
 		if err := self.aerospikeAccessAuth(c.cmd, k, nil); err != nil {
 			return err
@@ -252,6 +252,10 @@ func parserRedisKeyAndFields(args [][]byte) (*as.Key, []*as.Bin, error) {
 	}
 
 	return key, bins, nil
+}
+
+func convAsKey2Table(key *as.Key) string {
+	return key.Namespace() + ":" + key.SetName()
 }
 
 type AsCommandFunc func(c *Client, k *as.Key, w ResponseWriter) error

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/absolute8511/grace/gracenet"
 	"github.com/absolute8511/proxymodule/common"
@@ -16,20 +15,16 @@ var proxyModuleLog common.Logger
 
 type ProxyModuleMgr struct {
 	sync.Mutex
-	servers      map[string]common.ModuleProxyServer
-	confList     []common.ProxyConf
-	monitorQuitC chan struct{}
-	monitorRP    common.MonitorRepeater
-	wg           *sync.WaitGroup
+	servers  map[string]common.ModuleProxyServer
+	confList []common.ProxyConf
+	wg       *sync.WaitGroup
 }
 
-func NewProxyModuleMgr(c *common.ProxyModuleConf, monitorRP common.MonitorRepeater) *ProxyModuleMgr {
+func NewProxyModuleMgr(c *common.ProxyModuleConf) *ProxyModuleMgr {
 	mgr := &ProxyModuleMgr{
-		servers:      make(map[string]common.ModuleProxyServer),
-		confList:     c.ProxyConfList,
-		monitorRP:    monitorRP,
-		monitorQuitC: make(chan struct{}),
-		wg:           &sync.WaitGroup{},
+		servers:  make(map[string]common.ModuleProxyServer),
+		confList: c.ProxyConfList,
+		wg:       &sync.WaitGroup{},
 	}
 
 	common.GlobalControlCenter = common.NewControlCenter(c.DccServers,
@@ -84,14 +79,6 @@ func (self *ProxyModuleMgr) StartAll(grace *gracenet.Net) error {
 		}()
 	}
 
-	if self.monitorRP != nil {
-		self.wg.Add(1)
-		go func() {
-			defer self.wg.Done()
-			self.DoProxyModulesMonitor()
-		}()
-	}
-
 	return nil
 }
 
@@ -99,7 +86,6 @@ func (self *ProxyModuleMgr) StopAll() {
 	if common.GlobalControlCenter != nil {
 		common.GlobalControlCenter.Close()
 	}
-	close(self.monitorQuitC)
 
 	defer func() {
 		if proxyModuleLog != nil {
@@ -170,22 +156,13 @@ func (self *ProxyModuleMgr) CheckGraceful() error {
 	return nil
 }
 
-func (self *ProxyModuleMgr) DoProxyModulesMonitor() {
-	flushTicker := time.NewTicker(60 * time.Second)
-	defer flushTicker.Stop()
+func (self *ProxyModuleMgr) GetModuleStats(module string) (interface{}, error) {
+	defer self.Mutex.Unlock()
+	self.Mutex.Lock()
 
-	for {
-		select {
-		case <-flushTicker.C:
-			self.Mutex.Lock()
-			for name, proxy := range self.servers {
-				if data := proxy.ProxyStatisticsData(); data != nil && len(data) > 0 {
-					self.monitorRP.PushMonitorData(name, data)
-				}
-			}
-			self.Mutex.Unlock()
-		case <-self.monitorQuitC:
-			return
-		}
+	if proxyModule, ok := self.servers[module]; ok {
+		return proxyModule.GetStatsData(), nil
+	} else {
+		return nil, fmt.Errorf("unknown proxy module:%s", module)
 	}
 }

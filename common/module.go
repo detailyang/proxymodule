@@ -3,7 +3,7 @@ package common
 type ModuleProxyServer interface {
 	Start()
 	Stop()
-	ProxyStatisticsData() []byte
+	GetStatsData() interface{}
 }
 
 type GraceModuleProxyServer interface {

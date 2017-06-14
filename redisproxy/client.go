@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/absolute8511/proxymodule/redisproxy/stats"
 )
 
 const (
@@ -47,10 +49,9 @@ type Client struct {
 	resp     ResponseWriter
 	buf      bytes.Buffer
 
-	closeCh    chan struct{}
-	closedFlag int32
-
-	proxyStatistics ProxyStatisticsModule
+	closeCh     chan struct{}
+	closedFlag  int32
+	moduleStats stats.ModuleStats
 }
 
 func newClient() *Client {
@@ -78,7 +79,7 @@ func (c *Client) reset() {
 	c.cmd = ""
 	c.buf.Reset()
 	c.remoteAddr = ""
-	c.proxyStatistics = nil
+	c.moduleStats = nil
 	c.Args = nil
 	c.RegCmds = nil
 
@@ -114,7 +115,6 @@ func (c *Client) perform() {
 	} else if c.authEnabled() && !c.isAuthed && c.cmd != "auth" {
 		err = ErrNotAuthenticated
 	} else {
-		//redisLog.Infof("redis command: %v with params: %v", string(c.cmd), c.Args)
 		err = exeCmd(c, c.resp)
 	}
 
@@ -135,16 +135,16 @@ func (c *Client) perform() {
 			string(fullCmd[:truncateLen]), err)
 	}
 
-	if c.proxyStatistics != nil {
-		if duration > time.Millisecond*2 {
-			c.proxyStatistics.IncrSlowOperation(duration)
+	if c.moduleStats != nil {
+		if duration > time.Millisecond {
+			c.moduleStats.UpdateSlowStats(duration)
 		}
-		c.proxyStatistics.IncrOpTime(duration.Nanoseconds())
+		c.moduleStats.IncrCost(duration)
 	}
 
 	if err != nil {
-		if c.proxyStatistics != nil {
-			c.proxyStatistics.IncrFailedOperation()
+		if c.moduleStats != nil {
+			c.moduleStats.IncrFailed()
 		}
 		c.resp.WriteError(err)
 

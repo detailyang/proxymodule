@@ -11,6 +11,7 @@ import (
 	"github.com/absolute8511/go-zanredisdb"
 	"github.com/absolute8511/grace/gracenet"
 	"github.com/absolute8511/proxymodule/common"
+	"github.com/absolute8511/proxymodule/redisproxy/stats"
 )
 
 const (
@@ -25,19 +26,12 @@ type netListenerEx interface {
 
 var redisLog = common.NewLevelLogger(1, nil)
 
-type ProxyStatisticsModule interface {
-	IncrSlowOperation(time.Duration)
-	IncrFailedOperation()
-	IncrOpTime(int64)
-	GenMonitorData() []byte
-}
-
 type RedisProxyModule interface {
 	RegisterCmd(*CmdRouter)
 	InitConf(func(v interface{}) error) error
 	Stop()
 	GetProxyName() string
-	GetStatisticsModule() ProxyStatisticsModule
+	GetStats() stats.ModuleStats
 }
 
 type RedisProxyModuleCreateFunc func() RedisProxyModule
@@ -201,13 +195,13 @@ func (self *RedisProxy) ServeRedis() {
 					close(connCh)
 				}
 				select {
-				case <-self.quitChan:
+				case <-self.graceQuitC:
+				default:
 					if ul, ok := l.(*net.UnixListener); ok {
 						//close UnixListener will not unlink the unix domain socket file at the upgraded child process
 						//we need to remove it manually
 						os.Remove(ul.Addr().String())
 					}
-				default:
 				}
 				self.wg.Done()
 			}()
@@ -234,7 +228,8 @@ func (self *RedisProxy) ServeRedis() {
 					redisLog.Infof("process has been stopped, stop accepting connections from %s", l.Addr().String())
 					return
 				case <-self.graceQuitC:
-					redisLog.Infof("quit gracefully, process [pid: %d] stop accepting connections from %s", os.Getpid(), l.Addr().String())
+					redisLog.Infof("quit gracefully, process [pid: %d] stop accepting connections from %s",
+						os.Getpid(), l.Addr().String())
 					return
 				default:
 					continue
@@ -252,7 +247,7 @@ func (self *RedisProxy) ServeRedis() {
 				client := pool.Get().(*RespClient)
 				client.Reset(conn)
 				client.RegCmds = self.router
-				client.proxyStatistics = self.proxyModule.GetStatisticsModule()
+				client.moduleStats = self.proxyModule.GetStats()
 
 				self.wg.Add(1)
 				go func() {
@@ -271,9 +266,9 @@ func (self *RedisProxy) ServeRedis() {
 	}
 }
 
-func (self *RedisProxy) ProxyStatisticsData() []byte {
-	if statisticsModule := self.proxyModule.GetStatisticsModule(); statisticsModule != nil {
-		return statisticsModule.GenMonitorData()
+func (self *RedisProxy) GetStatsData() interface{} {
+	if stats := self.proxyModule.GetStats(); stats != nil {
+		return stats.GetStatsData()
 	} else {
 		return nil
 	}
