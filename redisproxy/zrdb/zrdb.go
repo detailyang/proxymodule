@@ -40,11 +40,11 @@ var (
 
 const (
 	DefaultTendInterval = 3
-	DefaultReadTimeout  = 1
-	DefaultWriteTimeout = 1
-	DefaultDialTimeout  = 2
+	DefaultReadTimeout  = 3
+	DefaultWriteTimeout = 3
+	DefaultDialTimeout  = 3
 
-	DefaultMaxActiveConn = 256
+	DefaultMaxActiveConn = 640 //max connection number to a back-end node
 	DefaultIdleTimeout   = 120
 )
 
