@@ -221,42 +221,38 @@ func (ac *AccessControl) updateRWRule(e *common.CCEvent) {
 	}
 }
 
-func (ac *AccessControl) GetReadRule(key *KVDSKey) (*RWBaseRule, error) {
+func (ac *AccessControl) GetReadRule(namespace string, table string) (*RWBaseRule, error) {
 	ac.Mutex.Lock()
 	readRule := ac.tableReadRule
 	ac.Mutex.Unlock()
 
-	if rule, ok := readRule[ruleLookupKey(key)]; ok {
+	if rule, ok := readRule[ruleLookupKey(namespace, table)]; ok {
 		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
-			return nil, fmt.Errorf("no kvds clusters can be used to read table: [%s, %s]",
-				key.Namespace, key.Table)
+			return nil, fmt.Errorf("no kvds clusters can be used to read table: [%s, %s]", namespace, table)
 		} else {
 			return rule.gradationFilter(), nil
 		}
 	} else {
-		return nil, fmt.Errorf("can not find read rule for table: [%s, %s]",
-			key.Namespace, key.Table)
+		return nil, fmt.Errorf("can not find read rule for table: [%s, %s]", namespace, table)
 	}
 }
 
-func (ac *AccessControl) GetWriteRule(key *KVDSKey) (*RWBaseRule, error) {
+func (ac *AccessControl) GetWriteRule(namespace string, table string) (*RWBaseRule, error) {
 	ac.Mutex.Lock()
 	writeRule := ac.tableWriteRule
 	ac.Mutex.Unlock()
 
-	if rule, ok := writeRule[ruleLookupKey(key)]; ok {
+	if rule, ok := writeRule[ruleLookupKey(namespace, table)]; ok {
 		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
-			return nil, fmt.Errorf("no kvds clusters can be used to write table: [%s, %s]",
-				key.Namespace, key.Table)
+			return nil, fmt.Errorf("no kvds clusters can be used to write table: [%s, %s]", namespace, table)
 		} else {
 			return &rule.RWBaseRule, nil
 		}
 	} else {
-		return nil, fmt.Errorf("can not find write rule for table: [%s, %s]",
-			key.Namespace, key.Table)
+		return nil, fmt.Errorf("can not find write rule for table: [%s, %s]", namespace, table)
 	}
 }
 
-func ruleLookupKey(key *KVDSKey) string {
-	return key.Namespace + ":" + key.Table
+func ruleLookupKey(namespace string, table string) string {
+	return namespace + ":" + table
 }

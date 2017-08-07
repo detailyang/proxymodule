@@ -165,29 +165,25 @@ func (self *KVDSProxy) GetStats() stats.ModuleStats {
 }
 
 func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
-	if len(c.Args) == 0 {
-		return ErrCmdParams
-	}
-
-	key, err := kvds.ParseRedisKey(string(c.Args[0]))
+	namespace, table, err := kvds.CmdArgsLegitimacyCheck(c.cmd, c.Args)
 	if err != nil {
 		return err
 	}
 
-	if _, ok := self.namespace[key.Namespace]; !ok {
-		return fmt.Errorf("no namespace named:%s exists", key.Namespace)
+	if _, ok := self.namespace[namespace]; !ok {
+		return fmt.Errorf("no namespace named:%s exists", namespace)
 	}
 
-	rule, err := self.ac.GetWriteRule(key)
+	rule, err := self.ac.GetWriteRule(namespace, table)
 	if err != nil {
 		return err
 	}
 
 	if rule.CurCluster.Empty() {
-		return fmt.Errorf("the current cluster used to write [%s, %s] is empty", key.Namespace, key.Table)
+		return fmt.Errorf("the current cluster used to write [%s, %s] is empty", namespace, table)
 	}
 
-	self.ModuleStats.UpdateStats(c.cmd, convKVDSKey2Table(key), 1)
+	self.ModuleStats.UpdateStats(c.cmd, genStatsKey(namespace, table), 1)
 
 	//make a copy of the original command arguments in case of
 	//the key transformation used in data migration from cluster to cluster
@@ -196,23 +192,23 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 
 	if cluster := rule.PreCluster; !cluster.Empty() {
 		redisLog.Debugf("kvds write data to previous cluster [%s, %s], cmd: %s",
-			key.Namespace, cluster.Name, string(c.catGenericCommand()))
+			namespace, cluster.Name, string(c.catGenericCommand()))
 
 		c.Args = cluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		err = self.doCommand(key.Namespace, cluster.Name, c, &kvds.DummyRespWriter{})
+		err = self.doCommand(namespace, cluster.Name, c, &kvds.DummyRespWriter{})
 		//set the arguments back to original
 		c.Args = cmdArgs
 		if err != nil {
-			redisLog.Errorf("do write command failed at previous cluster [%s, %s], err:%s", key.Namespace, cluster.Name, err.Error())
+			redisLog.Errorf("do write command failed at previous cluster [%s, %s], err:%s", namespace, cluster.Name, err.Error())
 			return err
 		}
 	}
 
-	redisLog.Debugf("kvds write data to current cluster [%s, %s], cmd: %s", key.Namespace, key.Table, string(c.catGenericCommand()))
+	redisLog.Debugf("kvds write data to current cluster [%s, %s], cmd: %s", namespace, table, string(c.catGenericCommand()))
 
 	c.Args = rule.CurCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-	if err = self.doCommand(key.Namespace, rule.CurCluster.Name, c, resp); err != nil {
-		redisLog.Errorf("do write command failed at current cluster [%s, %s], err:%s", key.Namespace, rule.CurCluster.Name, err.Error())
+	if err = self.doCommand(namespace, rule.CurCluster.Name, c, resp); err != nil {
+		redisLog.Errorf("do write command failed at current cluster [%s, %s], err:%s", namespace, rule.CurCluster.Name, err.Error())
 	}
 
 	c.Args = cmdArgs
@@ -220,30 +216,25 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 }
 
 func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
-	if len(c.Args) == 0 {
-		return ErrCmdParams
-	}
-
-	key, err := kvds.ParseRedisKey(string(c.Args[0]))
+	namespace, table, err := kvds.CmdArgsLegitimacyCheck(c.cmd, c.Args)
 	if err != nil {
 		return err
 	}
 
-	if _, ok := self.namespace[key.Namespace]; !ok {
-		return fmt.Errorf("no namespace named:%s has been used right now", key.Namespace)
+	if _, ok := self.namespace[namespace]; !ok {
+		return fmt.Errorf("no namespace named:%s has been used right now", namespace)
 	}
 
-	rule, err := self.ac.GetReadRule(key)
+	rule, err := self.ac.GetReadRule(namespace, table)
 	if err != nil {
 		return err
 	}
 
 	if rule.CurCluster.Empty() {
-		return fmt.Errorf("the current cluster used to read [%s, %s] is empty",
-			key.Namespace, key.Table)
+		return fmt.Errorf("the current cluster used to read [%s, %s] is empty", namespace, table)
 	}
 
-	self.ModuleStats.UpdateStats(c.cmd, convKVDSKey2Table(key), 1)
+	self.ModuleStats.UpdateStats(c.cmd, genStatsKey(namespace, table), 1)
 
 	cmdArgs := make([][]byte, len(c.Args))
 	copy(cmdArgs, c.Args)
@@ -255,21 +246,21 @@ func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
 
 	if !rule.PreCluster.Empty() {
 		redisLog.Debugf("table [%s, %s] read current cluster [%s] and previous cluster [%s]",
-			key.Namespace, key.Table, rule.CurCluster.Name, rule.PreCluster.Name)
+			namespace, table, rule.CurCluster.Name, rule.PreCluster.Name)
 
 		buf := &bytes.Buffer{}
 		respBuf := NewRespWriter(bufio.NewWriter(buf))
 
 		//read current cluster at first
 		c.Args = rule.CurCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		if err := self.doCommand(key.Namespace, rule.CurCluster.Name, c, respBuf); err != nil {
+		if err := self.doCommand(namespace, rule.CurCluster.Name, c, respBuf); err != nil {
 			redisLog.Errorf("read [%s, %s] from current cluster:%s failed, error:%s, fall back to read previous cluster:%s",
-				key.Namespace, key.Table, rule.CurCluster.Name, err.Error(), rule.PreCluster.Name)
+				namespace, table, rule.CurCluster.Name, err.Error(), rule.PreCluster.Name)
 		} else {
 			respBuf.Flush()
 			if IsNilValue(buf.Bytes()) {
 				redisLog.Debugf("read [%s, %s] from current cluster:%s return empty, fall back to read previous cluster:%s",
-					key.Namespace, key.Table, rule.CurCluster.Name, rule.PreCluster.Name)
+					namespace, table, rule.CurCluster.Name, rule.PreCluster.Name)
 			} else {
 				resp.WriteRawBytes(buf.Bytes())
 				return nil
@@ -277,10 +268,10 @@ func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
 		}
 
 		c.Args = rule.PreCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		return self.doCommand(key.Namespace, rule.PreCluster.Name, c, resp)
+		return self.doCommand(namespace, rule.PreCluster.Name, c, resp)
 	} else {
 		c.Args = rule.CurCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		return self.doCommand(key.Namespace, rule.CurCluster.Name, c, resp)
+		return self.doCommand(namespace, rule.CurCluster.Name, c, resp)
 	}
 }
 
@@ -342,6 +333,6 @@ func (self *KVDSProxy) doCommand(ns string, cluster string, c *Client, resp Resp
 	}
 }
 
-func convKVDSKey2Table(key *kvds.KVDSKey) string {
-	return key.Namespace + ":" + key.Table
+func genStatsKey(namespace string, table string) string {
+	return namespace + ":" + table
 }

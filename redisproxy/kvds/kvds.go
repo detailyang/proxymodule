@@ -19,7 +19,9 @@ var (
 )
 
 var (
-	ErrKVDSKeyInvalid = errors.New("the format of the key is invalid for KVDS")
+	ErrKVDSKeyInvalid         = errors.New("the format of the key is invalid for KVDS")
+	ErrRWAcrossNamespaceTable = errors.New("can not read-write keys across namespaces or tables")
+	ErrCmdParamsLength        = errors.New("command params is empty")
 )
 
 const (
@@ -150,4 +152,33 @@ func (w *DummyRespWriter) WriteRawBytes([]byte) error {
 
 func (w *DummyRespWriter) Flush() error {
 	return nil
+
+}
+
+/*
+check the legality of the command arguments, all commands can not read or write keys
+across namespaces or tables. Return the namespace and table the command read or write if the
+check passed.
+*/
+func CmdArgsLegitimacyCheck(cmd string, Args [][]byte) (namespace string, table string, err error) {
+	if len(Args) == 0 {
+		err = ErrCmdParamsLength
+		return
+	}
+	var key *KVDSKey
+	for i, Arg := range Args {
+		if _, ok := kvPairCommands[cmd]; ok && i%2 != 0 {
+			continue
+		}
+		if key, err = ParseRedisKey(string(Arg)); err != nil {
+			break
+		} else if namespace == "" || table == "" {
+			namespace, table = key.Namespace, key.Table
+		} else if namespace != key.Namespace || table != key.Table {
+			namespace, table = "", ""
+			err = ErrRWAcrossNamespaceTable
+			break
+		}
+	}
+	return
 }

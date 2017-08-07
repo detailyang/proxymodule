@@ -71,7 +71,7 @@ func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
 			if _, err := proxy.newZRClient(ns); err != nil {
 				redisLog.Errorf("add router for namespace:%s failed, err: %s", ns, err.Error())
 			} else {
-				redisLog.Infof("add router for namespace:%s to handle ZanRedisDB request", ns)
+				redisLog.Infof("add router for namespace:%s to handle request", ns)
 			}
 		}
 	}
@@ -92,6 +92,7 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("setnx", commandSingleKeyExec(proxy))
 	router.Register("exists", commandMultiKeyExec(proxy))
 	router.Register("mset", commandMultiKVExec(proxy))
+	router.Register("mget", proxy.mgetCommand)
 
 	for _, hashCmd := range zrdb.HashCmds {
 		router.Register(hashCmd, commandSingleKeyExec(proxy))
@@ -134,7 +135,7 @@ func (proxy *ZRDBProxy) cmdExec(cmd string, resp ResponseWriter, pk *zanredisdb.
 		if err != nil {
 			return err
 		} else {
-			redisLog.Infof("dynamically add router for namespace:%s to handle ZanRedisDB request", pk.Namespace)
+			redisLog.Infof("dynamically add router for namespace:%s to handle request", pk.Namespace)
 		}
 	}
 
@@ -147,7 +148,7 @@ func (proxy *ZRDBProxy) cmdExec(cmd string, resp ResponseWriter, pk *zanredisdb.
 			return err
 		}
 	} else {
-		return fmt.Errorf("can not find router to handle ZanRedisDB request of namespace:%s", pk.Namespace)
+		return fmt.Errorf("can not find router to handle request of namespace:%s", pk.Namespace)
 	}
 }
 
@@ -183,7 +184,7 @@ func (proxy *ZRDBProxy) CheckUsedAsKVDSModule() bool {
 
 func (proxy *ZRDBProxy) SetUsedAsKVDSModule() error {
 	if !proxy.CheckUsedAsKVDSModule() {
-		return errors.New("the ZanRedisDB proxy module can't be used as a module of KVDS, please check the configuration")
+		return errors.New("proxy module can't be used as a module of KVDS, please check the configuration")
 	} else {
 		proxy.asKVDSModule = true
 		proxy.dynamically = false
@@ -290,6 +291,57 @@ func commandMultiKVExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) e
 		} else {
 			return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
 		}
+	}
+}
+
+func (proxy *ZRDBProxy) mgetCommand(c *Client, resp ResponseWriter) error {
+	if len(c.Args) == 0 {
+		return ErrCmdParams
+	}
+
+	var pKeys []*zanredisdb.PKey
+	var Namespace string
+	for _, key := range c.Args {
+		pk, err := zrdb.ParseKey(key)
+		if err != nil {
+			return err
+		} else if Namespace == "" {
+			Namespace = pk.Namespace
+		} else if Namespace != pk.Namespace {
+			return errors.New("can not use MGET to get keys cross namespaces")
+		}
+
+		if proxy.asKVDSModule {
+			pk = zanredisdb.NewPKey(proxy.conf.Namespace[0], pk.Set, pk.PK)
+		}
+		pKeys = append(pKeys, pk)
+
+		proxy.UpdateStats("mget", convZKey2Table(pk), 1)
+	}
+
+	if proxy.asKVDSModule {
+		Namespace = pKeys[0].Namespace
+	}
+
+	var zrClient *zanredisdb.ZanRedisClient
+	var err error
+	zrClient, ok := proxy.router[Namespace]
+	if !ok && proxy.dynamically {
+		if zrClient, err = proxy.newZRClient(Namespace); err != nil {
+			return err
+		}
+		redisLog.Infof("dynamically add router for namespace:%s to handle request", Namespace)
+	}
+
+	if zrClient == nil {
+		return fmt.Errorf("can not find router to handle request of namespace:%s", Namespace)
+	}
+
+	if rsp, err := zrClient.KVMGet(pKeys...); err != nil {
+		return err
+	} else {
+		WriteValue(resp, rsp)
+		return nil
 	}
 }
 
