@@ -166,6 +166,12 @@ func CmdArgsLegitimacyCheck(cmd string, Args [][]byte) (namespace string, table 
 		return
 	}
 	var key *KVDSKey
+	if _, ok := unaryCommands[cmd]; ok {
+		if key, err = ParseRedisKey(string(Args[0])); err == nil {
+			namespace, table = key.Namespace, key.Table
+		}
+		return
+	}
 	for i, Arg := range Args {
 		if _, ok := kvPairCommands[cmd]; ok && i%2 != 0 {
 			continue
