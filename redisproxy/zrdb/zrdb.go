@@ -44,8 +44,14 @@ const (
 	DefaultWriteTimeout = 3
 	DefaultDialTimeout  = 3
 
-	DefaultMaxActiveConn = 640 //max connection number to a back-end node
-	DefaultIdleTimeout   = 120
+	// max connection number to a back-end node
+	DefaultMaxActiveConn = 640
+
+	// max idle connection number to a back-end node
+	DefaultMaxIdleConn = 512
+
+	// the idle connection will be closed after 120 seconds
+	DefaultIdleTimeout = 120
 )
 
 func ParseKey(key []byte) (*zanredisdb.PKey, error) {

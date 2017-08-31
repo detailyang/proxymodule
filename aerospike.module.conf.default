@@ -1,5 +1,7 @@
 {
     "AerospikeServers":["192.168.66.202:3000"],
-    "Timeout":5
+    "Timeout":5,
     "UseWhiteList":false,
+	"ConnectionQueueSize":256,
+	"LimitConnectionsToQueueSize":true
 }

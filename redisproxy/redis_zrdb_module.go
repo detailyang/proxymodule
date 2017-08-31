@@ -17,8 +17,9 @@ type ZRDBConf struct {
 	ReadTimeout   int64
 	WriteTimeout  int64
 	TendInterval  int64
-	MaxActiveConn int32
 	IdleTimeout   int64
+	MaxActiveConn int
+	MaxIdleConn   int
 
 	LookupList []string
 	Password   string
@@ -49,14 +50,14 @@ func (proxy *ZRDBProxy) GetProxyName() string {
 }
 
 func (proxy *ZRDBProxy) InitConf(loadConfig func(v interface{}) error) error {
-
 	proxy.conf = &ZRDBConf{
 		TendInterval:  zrdb.DefaultTendInterval,
 		DialTimeout:   zrdb.DefaultDialTimeout,
 		ReadTimeout:   zrdb.DefaultReadTimeout,
 		WriteTimeout:  zrdb.DefaultWriteTimeout,
-		IdleTimeout:   int64(zrdb.DefaultIdleTimeout),
-		MaxActiveConn: int32(zrdb.DefaultMaxActiveConn),
+		IdleTimeout:   zrdb.DefaultIdleTimeout,
+		MaxActiveConn: zrdb.DefaultMaxActiveConn,
+		MaxIdleConn:   zrdb.DefaultMaxIdleConn,
 	}
 
 	if err := loadConfig(proxy.conf); err != nil {
@@ -163,10 +164,12 @@ func (proxy *ZRDBProxy) newZRClient(namespace string) (*zanredisdb.ZanRedisClien
 		ReadTimeout:  time.Duration(proxy.conf.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(proxy.conf.WriteTimeout) * time.Second,
 		IdleTimeout:  time.Duration(proxy.conf.IdleTimeout) * time.Second,
-		MaxActive:    proxy.conf.MaxActiveConn,
-		TendInterval: proxy.conf.TendInterval,
-		Namespace:    namespace,
-		Password:     proxy.conf.Password,
+
+		MaxActiveConn: proxy.conf.MaxActiveConn,
+		MaxIdleConn:   proxy.conf.MaxIdleConn,
+		TendInterval:  proxy.conf.TendInterval,
+		Namespace:     namespace,
+		Password:      proxy.conf.Password,
 	})
 	zrClient.Start()
 	proxy.router[namespace] = zrClient
