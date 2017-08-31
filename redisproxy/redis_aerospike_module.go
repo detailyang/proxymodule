@@ -26,7 +26,17 @@ type AerospikeRedisConf struct {
 	AerospikeServers []string
 	Timeout          int
 	//MaxRetries       int64
-	UseWhiteList bool
+	UseWhiteList                bool
+	ConnectionQueueSize         int
+	LimitConnectionsToQueueSize bool
+}
+
+func NewAerospikeRedisConf() *AerospikeRedisConf {
+	return &AerospikeRedisConf{
+		UseWhiteList:                false,
+		ConnectionQueueSize:         256,
+		LimitConnectionsToQueueSize: true,
+	}
 }
 
 type AerospikeRedisProxy struct {
@@ -62,7 +72,7 @@ func (self *AerospikeRedisProxy) Stop() {
 }
 
 func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
-	self.conf = &AerospikeRedisConf{}
+	self.conf = NewAerospikeRedisConf()
 	err := f(self.conf)
 	if err != nil {
 		return err
@@ -89,6 +99,9 @@ func (self *AerospikeRedisProxy) InitConf(f func(v interface{}) error) error {
 
 	asClientPolicy := as.NewClientPolicy()
 	asClientPolicy.FailIfNotConnected = false
+	asClientPolicy.ConnectionQueueSize = self.conf.ConnectionQueueSize
+	asClientPolicy.LimitConnectionsToQueueSize = self.conf.LimitConnectionsToQueueSize
+
 	self.asClient, err = as.NewClientWithPolicyAndHost(asClientPolicy, hosts...)
 	if err != nil {
 		redisLog.Errorf("failed to init aerospike client: %v", err)
