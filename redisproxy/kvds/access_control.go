@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"regexp"
 	"runtime"
 	"sync"
 
@@ -226,15 +227,27 @@ func (ac *AccessControl) GetReadRule(namespace string, table string) (*RWBaseRul
 	readRule := ac.tableReadRule
 	ac.Mutex.Unlock()
 
-	if rule, ok := readRule[ruleLookupKey(namespace, table)]; ok {
-		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
-			return nil, fmt.Errorf("no kvds clusters can be used to read table: [%s, %s]", namespace, table)
-		} else {
-			return rule.gradationFilter(), nil
+	lookUpKey := ruleLookupKey(namespace, table)
+	rule, ok := readRule[lookUpKey]
+	if !ok {
+		for k, v := range readRule {
+			if match, err := regexp.MatchString(k, lookUpKey); match && err == nil {
+				rule = v
+				break
+			}
 		}
-	} else {
-		return nil, fmt.Errorf("can not find read rule for table: [%s, %s]", namespace, table)
 	}
+
+	if rule == nil {
+		return nil, fmt.Errorf("can not find read rule for table: [%s, %s]", namespace, table)
+
+	} else if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
+		return nil, fmt.Errorf("no kvds clusters can be used to read table: [%s, %s]", namespace, table)
+
+	} else {
+		return rule.gradationFilter(), nil
+	}
+
 }
 
 func (ac *AccessControl) GetWriteRule(namespace string, table string) (*RWBaseRule, error) {
@@ -242,14 +255,25 @@ func (ac *AccessControl) GetWriteRule(namespace string, table string) (*RWBaseRu
 	writeRule := ac.tableWriteRule
 	ac.Mutex.Unlock()
 
-	if rule, ok := writeRule[ruleLookupKey(namespace, table)]; ok {
-		if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
-			return nil, fmt.Errorf("no kvds clusters can be used to write table: [%s, %s]", namespace, table)
-		} else {
-			return &rule.RWBaseRule, nil
+	lookUpKey := ruleLookupKey(namespace, table)
+	rule, ok := writeRule[lookUpKey]
+	if !ok {
+		for k, v := range writeRule {
+			if match, err := regexp.MatchString(k, lookUpKey); match && err == nil {
+				rule = v
+				break
+			}
 		}
-	} else {
+	}
+
+	if rule == nil {
 		return nil, fmt.Errorf("can not find write rule for table: [%s, %s]", namespace, table)
+
+	} else if rule.CurCluster.Empty() && rule.PreCluster.Empty() {
+		return nil, fmt.Errorf("no kvds clusters can be used to write table: [%s, %s]", namespace, table)
+
+	} else {
+		return &rule.RWBaseRule, nil
 	}
 }
 
