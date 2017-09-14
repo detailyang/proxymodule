@@ -114,6 +114,10 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 		router.Register(zsetCmd, commandSingleKeyExec(proxy))
 	}
 
+	for _, jsonCmd := range zrdb.JsonCmds {
+		router.Register(jsonCmd, commandSingleKeyExec(proxy))
+	}
+
 }
 
 func (proxy *ZRDBProxy) GetStats() stats.ModuleStats {

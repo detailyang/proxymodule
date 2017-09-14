@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/absolute8511/proxymodule/redisproxy/stats"
-	"github.com/garyburd/redigo/redis"
+	"github.com/absolute8511/redigo/redis"
 )
 
 var (

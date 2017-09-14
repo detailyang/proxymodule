@@ -36,6 +36,11 @@ var (
 		"zremrangebyscore", "zremrangebylex", "zclear",
 		"zexpire", "zttl", "zpersist",
 	}
+
+	JsonCmds = []string{
+		"json.get", "json.keyexists", "json.mkget", "json.type", "json.arrlen", "json.objkeys",
+		"json.objlen", "json.set", "json.del", "json.arrappend", "json.arrpop",
+	}
 )
 
 const (

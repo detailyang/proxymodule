@@ -40,6 +40,9 @@ func init() {
 
 		"hkeys", "hlen", "lindex", "zscore", "zlexcount",
 		"zrangebylex", "lttl", "httl", "sttl", "zttl",
+
+		"json.get", "json.keyexists", "json.mkget",
+		"json.type", "json.arrlen", "json.objlen",
 	} {
 		ReadCommands[cmd] = struct{}{}
 	}
@@ -55,6 +58,8 @@ func init() {
 		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
 		"persist", "lpersist", "hpersist", "spersist", "zpersist",
 		"expire", "lexpire", "hexpire", "sexpire", "zexpire",
+
+		"json.set", "json.del", "json.arrappend", "json.arrpop",
 	} {
 		WriteCommands[cmd] = struct{}{}
 	}
@@ -75,6 +80,9 @@ func init() {
 		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
 		"lttl", "httl", "sttl", "zttl", "persist", "hpersist", "lpersist", "spersist", "zpersist",
 		"hexpire", "lexpire", "sexpire", "zexpire",
+
+		"json.set", "json.del", "json.arrappend", "json.arrpop",
+		"json.get", "json.keyexists", "json.type", "json.arrlen", "json.objlen",
 	} {
 		unaryCommands[cmd] = struct{}{}
 	}
@@ -83,6 +91,7 @@ func init() {
 	for _, cmd := range []string{
 		"exists", "mget", "sinter", "sunion", "sdiff",
 		"del", "sinterstore", "sdiffstore", "sunionstore",
+		"json.mkget",
 	} {
 		multiCommands[cmd] = struct{}{}
 	}
