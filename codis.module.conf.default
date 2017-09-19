@@ -1,9 +1,12 @@
 {
     "TendInterval":3,
     "ReadTimeout":3,
-    "WriteTimeout":3,
-    "DialTimeout":3,
+    "WriteTimeout":0,
+    "DialTimeout":5,
+    "MaxActiveConn":1024,
+    "MaxIdleConn":128,
+    "IdleTimeout":120,
     "ServerList":[
-        {"ServerAddr":"127.0.0.1:6379"}
+        {"ServerAddr":"10.9.96.250:3803"}
     ]
 }

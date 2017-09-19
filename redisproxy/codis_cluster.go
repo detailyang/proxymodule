@@ -9,6 +9,16 @@ import (
 	"github.com/absolute8511/redigo/redis"
 )
 
+const (
+	defaultMaxIdleConn   = 128
+	defaultMaxActiveConn = 1024
+	defaultTendInterval  = 3
+	defaultReadTimeout   = 3
+	defaultWriteTimeout  = 3
+	defaultDialTimeout   = 5
+	defaultIdleTimeout   = 120
+)
+
 type CodisHost struct {
 	addr     string
 	connPool *redis.Pool
@@ -18,21 +28,29 @@ type CodisCluster struct {
 	sync.Mutex
 	ServerList []CodisServer
 
-	rotate       int64
-	nodes        []*CodisHost
-	tendInterval int64
-	wg           sync.WaitGroup
-	quitC        chan struct{}
+	rotate int64
+	nodes  []*CodisHost
+
+	tendInterval  int64
+	maxIdleConn   int
+	maxActiveConn int
+	idleTimeout   int64
+
+	wg    sync.WaitGroup
+	quitC chan struct{}
 
 	dialF func(string) (redis.Conn, error)
 }
 
 func NewCodisCluster(conf *CodisProxyConf) *CodisCluster {
 	cluster := &CodisCluster{
-		quitC:        make(chan struct{}),
-		tendInterval: conf.TendInterval,
-		ServerList:   make([]CodisServer, len(conf.ServerList)),
-		nodes:        make([]*CodisHost, 0, len(conf.ServerList)),
+		quitC:         make(chan struct{}),
+		tendInterval:  conf.TendInterval,
+		maxActiveConn: conf.MaxActiveConn,
+		maxIdleConn:   conf.MaxIdleConn,
+		idleTimeout:   conf.IdleTimeout,
+		ServerList:    make([]CodisServer, len(conf.ServerList)),
+		nodes:         make([]*CodisHost, 0, len(conf.ServerList)),
 	}
 
 	copy(cluster.ServerList, conf.ServerList)
@@ -124,13 +142,12 @@ func (cluster *CodisCluster) Tend() {
 		return
 	}
 
-	usedLen := len(newNodes) + len(availableHosts)
 	for addr, _ := range availableHosts {
 		newNode := &CodisHost{addr: addr}
 		newNode.connPool = &redis.Pool{
-			MaxIdle:      int(256/usedLen) + 1,
-			MaxActive:    int(512/usedLen) + 1,
-			IdleTimeout:  120 * time.Second,
+			MaxIdle:      cluster.maxIdleConn,
+			MaxActive:    cluster.maxActiveConn,
+			IdleTimeout:  time.Duration(cluster.idleTimeout) * time.Second,
 			TestOnBorrow: testF,
 			Dial:         func() (redis.Conn, error) { return cluster.dialF(newNode.addr) },
 		}

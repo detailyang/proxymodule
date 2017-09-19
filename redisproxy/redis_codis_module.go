@@ -13,19 +13,18 @@ var (
 	supportedCommands []string
 )
 
-const (
-	defaultTendInterval = 3
-)
-
 type CodisServer struct {
 	ServerAddr string
 }
 
 type CodisProxyConf struct {
-	TendInterval int64
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	DialTimeout  time.Duration
+	TendInterval  int64
+	ReadTimeout   time.Duration
+	WriteTimeout  time.Duration
+	DialTimeout   time.Duration
+	MaxActiveConn int
+	MaxIdleConn   int
+	IdleTimeout   int64
 
 	ServerList []CodisServer
 }
@@ -71,13 +70,17 @@ func (proxy *CodisProxy) SupportedCommands() []string {
 }
 
 func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
-	proxy.conf = &CodisProxyConf{}
+	proxy.conf = &CodisProxyConf{
+		DialTimeout:   defaultDialTimeout,
+		IdleTimeout:   defaultIdleTimeout,
+		MaxActiveConn: defaultMaxActiveConn,
+		MaxIdleConn:   defaultMaxIdleConn,
+		ReadTimeout:   defaultReadTimeout,
+		TendInterval:  defaultTendInterval,
+		WriteTimeout:  defaultWriteTimeout,
+	}
 	if err := loadConfig(proxy.conf); err != nil {
 		return err
-	}
-
-	if proxy.conf.TendInterval <= 0 {
-		proxy.conf.TendInterval = defaultTendInterval
 	}
 
 	proxy.cluster = NewCodisCluster(proxy.conf)
@@ -88,6 +91,9 @@ func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
 
 func (proxy *CodisProxy) RegisterCmd(router *CmdRouter) {
 	maxRetry := int(len(proxy.conf.ServerList)/2) + 1
+	if maxRetry < 3 {
+		maxRetry = 3
+	}
 
 	commandExec := func(c *Client, resp ResponseWriter) error {
 		if len(c.Args) < 1 {
