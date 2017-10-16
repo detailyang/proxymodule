@@ -43,6 +43,8 @@ func init() {
 
 		"json.get", "json.keyexists", "json.mkget",
 		"json.type", "json.arrlen", "json.objlen",
+
+		"geodist", "geohash", "georadius", "georadiusbymember", "geopos",
 	} {
 		ReadCommands[cmd] = struct{}{}
 	}
@@ -60,6 +62,8 @@ func init() {
 		"expire", "lexpire", "hexpire", "sexpire", "zexpire",
 
 		"json.set", "json.del", "json.arrappend", "json.arrpop",
+
+		"geoadd",
 	} {
 		WriteCommands[cmd] = struct{}{}
 	}
@@ -83,6 +87,8 @@ func init() {
 
 		"json.set", "json.del", "json.arrappend", "json.arrpop",
 		"json.get", "json.keyexists", "json.type", "json.arrlen", "json.objlen",
+
+		"geodist", "geohash", "georadius", "georadiusbymember", "geopos", "geoadd",
 	} {
 		unaryCommands[cmd] = struct{}{}
 	}
@@ -165,11 +171,9 @@ func (w *DummyRespWriter) Flush() error {
 }
 
 /*
-check the legality of the command arguments, all commands can not read or write keys
-across namespaces or tables. Return the namespace and table the command read or write if the
-check passed.
+All commands should not read or write keys across namespaces or tables.
 */
-func CmdArgsLegitimacyCheck(cmd string, Args [][]byte) (namespace string, table string, err error) {
+func ExtractNamespceTable(cmd string, Args [][]byte) (namespace string, table string, err error) {
 	if len(Args) == 0 {
 		err = ErrCmdParamsLength
 		return

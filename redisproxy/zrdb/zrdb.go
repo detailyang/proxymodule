@@ -41,6 +41,10 @@ var (
 		"json.get", "json.keyexists", "json.mkget", "json.type", "json.arrlen", "json.objkeys",
 		"json.objlen", "json.set", "json.del", "json.arrappend", "json.arrpop",
 	}
+
+	GeoCmds = []string{
+		"geoadd", "geopos", "geodist", "geohash", "georadius", "georadiusbymember",
+	}
 )
 
 const (

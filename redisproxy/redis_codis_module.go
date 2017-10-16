@@ -145,14 +145,6 @@ func (proxy *CodisProxy) Stop() {
 	proxy.cluster.Close()
 }
 
-func (proxy *CodisProxy) CheckUsedAsKVDSModule() bool {
-	return true
-}
-
-func (proxy *CodisProxy) SetUsedAsKVDSModule() error {
-	return nil
-}
-
 func codisKey2Table(ck []byte) string {
 	if parts := bytes.Split(ck, []byte(":")); len(parts) >= 2 {
 		return string(parts[0])

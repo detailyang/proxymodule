@@ -4,21 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"math/rand"
+	"strings"
 
 	"github.com/absolute8511/proxymodule/common"
 	"github.com/absolute8511/proxymodule/redisproxy/kvds"
 	"github.com/absolute8511/proxymodule/redisproxy/stats"
 )
 
-type KVDSRedisProxyModule interface {
-	RedisProxyModule
-	SetUsedAsKVDSModule() error
-	CheckUsedAsKVDSModule() bool
-}
-
 type KVModule struct {
 	Protocol string
-	proxy    KVDSRedisProxyModule
+	proxy    RedisProxyModule
 	handler  *CmdRouter
 }
 
@@ -86,29 +82,21 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 				handler: NewCmdRouter(),
 			}
 
-			var proxy RedisProxyModule
 			switch conf.Protocol {
 			case "AEROSPIKE":
 				{
-					proxy = CreateRedis2AerospikeProxy()
+					module.proxy = CreateRedis2AerospikeProxy()
 				}
 			case "CODIS":
 				{
-					proxy = CreateCodisProxy()
+					module.proxy = CreateCodisProxy()
 				}
 			case "ZRDB":
 				{
-					proxy = CreateZRDBProxy()
+					module.proxy = CreateZRDBProxy()
 				}
 			default:
 				redisLog.Errorf("unknown protocol:%s ", conf.Protocol)
-				continue
-			}
-
-			if kvdsProxy, ok := proxy.(KVDSRedisProxyModule); ok {
-				module.proxy = kvdsProxy
-			} else {
-				redisLog.Errorf("the RedisProxyModule for protocol:%s can not be used as KVDSRedisProxyModule", conf.Protocol)
 				continue
 			}
 
@@ -120,19 +108,13 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 				continue
 			}
 
-			if !module.proxy.CheckUsedAsKVDSModule() {
-				redisLog.Errorf("checking of used as KVDS module by cluster [%s, %s] of protocol:%s failed", ns, cluster, conf.Protocol)
-			} else if err := module.proxy.SetUsedAsKVDSModule(); err != nil {
-				redisLog.Errorf("set as KVDS module by cluster [%s, %s] of protocol:%s failed, err:%s", ns, cluster, conf.Protocol, err.Error())
+			module.Protocol = conf.Protocol
+			module.proxy.RegisterCmd(module.handler)
+			if err := self.namespace[ns].AddKVModule(cluster, &module); err != nil {
+				redisLog.Errorf("add kv module:%s into namespace:%s failed as:%s", cluster, ns, err.Error())
 			} else {
-				module.Protocol = conf.Protocol
-				module.proxy.RegisterCmd(module.handler)
-				if err := self.namespace[ns].AddKVModule(cluster, &module); err != nil {
-					redisLog.Errorf("add kv module:%s into namespace:%s failed as:%s", cluster, ns, err.Error())
-				} else {
-					self.ModuleStats.(*kvds.Stats).AddMemStats(cluster, module.proxy.GetStats())
-					redisLog.Infof("kv module [%s, %s] of protocol:%s come into service", ns, cluster, conf.Protocol)
-				}
+				self.ModuleStats.(*kvds.Stats).AddMemStats(cluster, module.proxy.GetStats())
+				redisLog.Infof("kv module [%s, %s] of protocol:%s come into service", ns, cluster, conf.Protocol)
 			}
 		}
 	}
@@ -165,114 +147,97 @@ func (self *KVDSProxy) GetStats() stats.ModuleStats {
 }
 
 func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
-	namespace, table, err := kvds.CmdArgsLegitimacyCheck(c.cmd, c.Args)
+	ns, table, err := kvds.ExtractNamespceTable(c.cmd, c.Args)
 	if err != nil {
 		return err
 	}
 
-	if _, ok := self.namespace[namespace]; !ok {
-		return fmt.Errorf("no namespace named:%s exists", namespace)
+	if _, ok := self.namespace[ns]; !ok {
+		return fmt.Errorf("no namespace named:%s exists", ns)
 	}
 
-	rule, err := self.ac.GetWriteRule(namespace, table)
+	route, err := self.ac.GetTableRoute(ns, table)
 	if err != nil {
 		return err
 	}
 
-	if rule.CurCluster.Empty() {
-		return fmt.Errorf("the current cluster used to write [%s, %s] is empty", namespace, table)
+	if route.CurCluster.Empty() {
+		return fmt.Errorf("the current cluster used to write [%s, %s] is empty", ns, table)
 	}
 
-	self.ModuleStats.UpdateStats(c.cmd, genStatsKey(namespace, table), 1)
+	self.ModuleStats.UpdateStats(c.cmd, genStatsKey(ns, table), 1)
 
-	//make a copy of the original command arguments in case of
-	//the key transformation used in data migration from cluster to cluster
-	cmdArgs := make([][]byte, len(c.Args))
-	copy(cmdArgs, c.Args)
+	if clster := &route.PreCluster; !clster.Empty() {
+		redisLog.Debugf("write to previous cluster [%s, %s], cmd: %s",
+			ns, clster.Name, string(c.catGenericCommand()))
 
-	if cluster := rule.PreCluster; !cluster.Empty() {
-		redisLog.Debugf("kvds write data to previous cluster [%s, %s], cmd: %s",
-			namespace, cluster.Name, string(c.catGenericCommand()))
-
-		c.Args = cluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		err = self.doCommand(namespace, cluster.Name, c, &kvds.DummyRespWriter{})
-		//set the arguments back to original
-		c.Args = cmdArgs
+		err = self.doCommand(ns, clster, c, &kvds.DummyRespWriter{})
 		if err != nil {
-			redisLog.Errorf("do write command failed at previous cluster [%s, %s], err:%s", namespace, cluster.Name, err.Error())
+			redisLog.Errorf("write failed at previous cluster [%s, %s], err:%s", ns, clster.Name, err.Error())
 			return err
 		}
 	}
 
-	redisLog.Debugf("kvds write data to current cluster [%s, %s], cmd: %s", namespace, table, string(c.catGenericCommand()))
+	redisLog.Debugf("write to current cluster [%s, %s], cmd: %s", ns, table, string(c.catGenericCommand()))
 
-	c.Args = rule.CurCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-	if err = self.doCommand(namespace, rule.CurCluster.Name, c, resp); err != nil {
-		redisLog.Errorf("do write command failed at current cluster [%s, %s], err:%s", namespace, rule.CurCluster.Name, err.Error())
+	if err = self.doCommand(ns, &route.CurCluster, c, resp); err != nil {
+		redisLog.Errorf("write failed at current cluster [%s, %s], err:%s", ns,
+			route.CurCluster.Name, err.Error())
 	}
 
-	c.Args = cmdArgs
 	return err
 }
 
 func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
-	namespace, table, err := kvds.CmdArgsLegitimacyCheck(c.cmd, c.Args)
+	ns, table, err := kvds.ExtractNamespceTable(c.cmd, c.Args)
 	if err != nil {
 		return err
 	}
 
-	if _, ok := self.namespace[namespace]; !ok {
-		return fmt.Errorf("no namespace named:%s has been used right now", namespace)
+	if _, ok := self.namespace[ns]; !ok {
+		return fmt.Errorf("no namespace named:%s has been used right now", ns)
 	}
 
-	rule, err := self.ac.GetReadRule(namespace, table)
+	route, err := self.ac.GetTableRoute(ns, table)
 	if err != nil {
 		return err
 	}
 
-	if rule.CurCluster.Empty() {
-		return fmt.Errorf("the current cluster used to read [%s, %s] is empty", namespace, table)
+	if route.CurCluster.Empty() {
+		return fmt.Errorf("the current cluster used to read [%s, %s] is empty", ns, table)
 	}
 
-	self.ModuleStats.UpdateStats(c.cmd, genStatsKey(namespace, table), 1)
+	self.ModuleStats.UpdateStats(c.cmd, genStatsKey(ns, table), 1)
 
-	cmdArgs := make([][]byte, len(c.Args))
-	copy(cmdArgs, c.Args)
+	if !route.PreCluster.Empty() {
+		if tryGradation(c, route) {
+			redisLog.Debugf("table [%s, %s] read current cluster [%s] and may fallback to previous cluster [%s]",
+				ns, table, route.CurCluster.Name, route.PreCluster.Name)
 
-	defer func() {
-		//set the arguments back to original before return
-		c.Args = cmdArgs
-	}()
+			buf := &bytes.Buffer{}
+			respBuf := NewRespWriter(bufio.NewWriter(buf))
 
-	if !rule.PreCluster.Empty() {
-		redisLog.Debugf("table [%s, %s] read current cluster [%s] and previous cluster [%s]",
-			namespace, table, rule.CurCluster.Name, rule.PreCluster.Name)
-
-		buf := &bytes.Buffer{}
-		respBuf := NewRespWriter(bufio.NewWriter(buf))
-
-		//read current cluster at first
-		c.Args = rule.CurCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		if err := self.doCommand(namespace, rule.CurCluster.Name, c, respBuf); err != nil {
-			redisLog.Errorf("read [%s, %s] from current cluster:%s failed, error:%s, fall back to read previous cluster:%s",
-				namespace, table, rule.CurCluster.Name, err.Error(), rule.PreCluster.Name)
-		} else {
-			respBuf.Flush()
-			if IsNilValue(buf.Bytes()) {
-				redisLog.Debugf("read [%s, %s] from current cluster:%s return empty, fall back to read previous cluster:%s",
-					namespace, table, rule.CurCluster.Name, rule.PreCluster.Name)
+			//Read current cluster at first.
+			if err := self.doCommand(ns, &route.CurCluster, c, respBuf); err != nil {
+				redisLog.Errorf("read [%s, %s] from current cluster:%s failed, error:%s, fallback to read previous cluster:%s",
+					ns, table, route.CurCluster.Name, err.Error(), route.PreCluster.Name)
 			} else {
-				resp.WriteRawBytes(buf.Bytes())
-				return nil
+				respBuf.Flush()
+				if IsNilValue(buf.Bytes()) {
+					redisLog.Debugf("read [%s, %s] from current cluster:%s return empty, fallback to read previous cluster:%s",
+						ns, table, route.CurCluster.Name, route.PreCluster.Name)
+				} else {
+					resp.WriteRawBytes(buf.Bytes())
+					return nil
+				}
 			}
 		}
-
-		c.Args = rule.PreCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		return self.doCommand(namespace, rule.PreCluster.Name, c, resp)
-	} else {
-		c.Args = rule.CurCluster.KeyTransfer.Transform(c.cmd, cmdArgs)
-		return self.doCommand(namespace, rule.CurCluster.Name, c, resp)
+		redisLog.Debugf("read [%s, %s] from previous cluster:%s", ns, table, route.PreCluster.Name)
+		return self.doCommand(ns, &route.PreCluster, c, resp)
 	}
+
+	redisLog.Debugf("read [%s, %s] from current cluster:%s", ns, table, route.CurCluster.Name)
+	return self.doCommand(ns, &route.CurCluster, c, resp)
 }
 
 /*
@@ -282,7 +247,10 @@ format of the command response
 protocol:AEROSPIKE
 #Info:
 ....
+
+TODO, support section
 */
+
 func (self *KVDSProxy) commandInfo(c *Client, resp ResponseWriter) error {
 	var info bytes.Buffer
 	buf := &bytes.Buffer{}
@@ -320,14 +288,24 @@ func (self *KVDSProxy) commandInfo(c *Client, resp ResponseWriter) error {
 	return nil
 }
 
-func (self *KVDSProxy) doCommand(ns string, cluster string, c *Client, resp ResponseWriter) error {
-	module, ok := self.namespace[ns].GetKVModule(cluster)
+func (self *KVDSProxy) doCommand(ns string, clster *kvds.Cluster, c *Client, resp ResponseWriter) error {
+	module, ok := self.namespace[ns].GetKVModule(clster.Name)
 	if !ok {
-		return fmt.Errorf("no cluster named:%s exists in namespace:%s ", ns, cluster)
+		return fmt.Errorf("no cluster named:%s exists in namespace:%s ", ns, clster.Name)
 	}
 
+	cmdArgs := make([][]byte, len(c.Args))
+	copy(cmdArgs, c.Args)
+
+	// Set the command arguments before return.
+	defer func() {
+		c.Args = cmdArgs
+	}()
+
+	c.Args = clster.Convert(c.cmd, c.Args)
+
 	if cmdHandler, ok := module.handler.GetCmdHandler(c.cmd); !ok {
-		return fmt.Errorf("command:%s is not supported by [%s, %s] ", c.cmd, ns, cluster)
+		return fmt.Errorf("command:%s is not supported by [%s, %s] ", c.cmd, ns, clster.Name)
 	} else {
 		return cmdHandler(c, resp)
 	}
@@ -335,4 +313,19 @@ func (self *KVDSProxy) doCommand(ns string, cluster string, c *Client, resp Resp
 
 func genStatsKey(namespace string, table string) string {
 	return namespace + ":" + table
+}
+
+func tryGradation(c *Client, route *kvds.Route) bool {
+	if len(route.Gradation) > 0 {
+		var percent float64
+		percent = route.Gradation[kvds.HostWildCard].Percent
+		host := (strings.SplitN(c.remoteAddr, ":", 2))[0]
+		if v, ok := route.Gradation[host]; ok {
+			percent = v.Percent
+		}
+		if rand.Float64() < percent/100 {
+			return true
+		}
+	}
+	return false
 }

@@ -1,13 +1,11 @@
 package redisproxy
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/absolute8511/go-zanredisdb"
-	"github.com/absolute8511/proxymodule/redisproxy/kvds"
 	"github.com/absolute8511/proxymodule/redisproxy/stats"
 	"github.com/absolute8511/proxymodule/redisproxy/zrdb"
 )
@@ -118,6 +116,9 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 		router.Register(jsonCmd, commandSingleKeyExec(proxy))
 	}
 
+	for _, GeoCmd := range zrdb.GeoCmds {
+		router.Register(GeoCmd, commandSingleKeyExec(proxy))
+	}
 }
 
 func (proxy *ZRDBProxy) GetStats() stats.ModuleStats {
@@ -181,82 +182,40 @@ func (proxy *ZRDBProxy) newZRClient(namespace string) (*zanredisdb.ZanRedisClien
 	return zrClient, nil
 }
 
-func (proxy *ZRDBProxy) CheckUsedAsKVDSModule() bool {
-	if len(proxy.conf.Namespace) == 1 {
-		return true
-	} else {
-		return false
-	}
-}
-
-func (proxy *ZRDBProxy) SetUsedAsKVDSModule() error {
-	if !proxy.CheckUsedAsKVDSModule() {
-		return errors.New("proxy module can't be used as a module of KVDS, please check the configuration")
-	} else {
-		proxy.asKVDSModule = true
-		proxy.dynamically = false
-		return nil
-	}
-}
-
 func commandSingleKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
 		if len(c.Args) == 0 {
 			return ErrCmdParams
 		}
-		var pk *zanredisdb.PKey
-		cmdArgs := make([]interface{}, len(c.Args))
-		var err error
-		if !proxy.asKVDSModule {
-			if pk, err = zrdb.ParseKey(c.Args[0]); err != nil {
-				return err
-			}
+		if pk, err := zrdb.ParseKey(c.Args[0]); err != nil {
+			return err
+		} else {
+			cmdArgs := make([]interface{}, len(c.Args))
 			for i, v := range c.Args {
 				cmdArgs[i] = v
 			}
-		} else {
-			fields := bytes.SplitN(c.Args[0], []byte(kvds.KeySep), 3)
-			if len(fields) != 3 {
-				return zrdb.ErrKeyInvalid
-			} else {
-				pk = zanredisdb.NewPKey(proxy.conf.Namespace[0], string(fields[1]), fields[2])
-			}
-			cmdArgs[0] = pk.RawKey
-			for i, v := range c.Args[1:] {
-				cmdArgs[i+1] = v
-			}
+			return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
 		}
-		return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
 	}
 }
 
-//exists, delete
+// exists, delete
+// TODO, the keys may cross partitions.
 func commandMultiKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
 		if len(c.Args) == 0 {
 			return ErrCmdParams
 		}
+
 		cmdArgs := make([]interface{}, len(c.Args))
-		if !proxy.asKVDSModule {
-			for i, rawKey := range c.Args {
-				if _, err := zrdb.ParseKey(rawKey); err != nil {
-					return err
-				}
-				cmdArgs[i] = rawKey
+		for i, rawKey := range c.Args {
+			if _, err := zrdb.ParseKey(rawKey); err != nil {
+				return err
 			}
-		} else {
-			ns := proxy.conf.Namespace[0]
-			for i, rawKey := range c.Args {
-				fields := bytes.SplitN(rawKey, []byte(kvds.KeySep), 3)
-				if len(fields) != 3 {
-					return zrdb.ErrKeyInvalid
-				}
-				tmpPK := zanredisdb.NewPKey(ns, string(fields[1]), fields[2])
-				cmdArgs[i] = tmpPK.RawKey
-			}
+			cmdArgs[i] = rawKey
 		}
 
-		if pk, err := zrdb.ParseKey(cmdArgs[0].([]byte)); err != nil {
+		if pk, err := zrdb.ParseKey(c.Args[0]); err != nil {
 			return err
 		} else {
 			return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
@@ -264,36 +223,25 @@ func commandMultiKeyExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) 
 	}
 }
 
-//mset
+// mset
+// TODO, the keys may cross partitions.
 func commandMultiKVExec(proxy *ZRDBProxy) func(c *Client, resp ResponseWriter) error {
 	return func(c *Client, resp ResponseWriter) error {
 		if len(c.Args)%2 != 0 || len(c.Args) == 0 {
 			return ErrCmdParams
 		}
+
 		cmdArgs := make([]interface{}, len(c.Args))
-		if proxy.asKVDSModule {
-			ns := proxy.conf.Namespace[0]
-			for i, j := 0, 1; i < len(c.Args) && j < len(c.Args); i, j = i+2, j+2 {
-				fields := bytes.SplitN(c.Args[i], []byte(kvds.KeySep), 3)
-				if len(fields) != 3 {
-					return zrdb.ErrKeyInvalid
-				}
-				tmpPK := zanredisdb.NewPKey(ns, string(fields[1]), fields[2])
-				cmdArgs[i] = tmpPK.RawKey
-				cmdArgs[j] = c.Args[j]
-			}
-		} else {
-			for i := 0; i < len(c.Args); i += 2 {
-				if _, err := zrdb.ParseKey(c.Args[i]); err != nil {
-					return err
-				}
-			}
-			for i, rawArg := range c.Args {
-				cmdArgs[i] = rawArg
+		for i := 0; i < len(c.Args); i += 2 {
+			if _, err := zrdb.ParseKey(c.Args[i]); err != nil {
+				return err
 			}
 		}
+		for i, rawArg := range c.Args {
+			cmdArgs[i] = rawArg
+		}
 
-		if pk, err := zrdb.ParseKey(cmdArgs[0].([]byte)); err != nil {
+		if pk, err := zrdb.ParseKey(c.Args[0]); err != nil {
 			return err
 		} else {
 			return proxy.cmdExec(c.cmd, resp, pk, cmdArgs...)
@@ -318,16 +266,9 @@ func (proxy *ZRDBProxy) mgetCommand(c *Client, resp ResponseWriter) error {
 			return errors.New("can not use MGET to get keys cross namespaces")
 		}
 
-		if proxy.asKVDSModule {
-			pk = zanredisdb.NewPKey(proxy.conf.Namespace[0], pk.Set, pk.PK)
-		}
 		pKeys = append(pKeys, pk)
 
 		proxy.UpdateStats("mget", convZKey2Table(pk), 1)
-	}
-
-	if proxy.asKVDSModule {
-		Namespace = pKeys[0].Namespace
 	}
 
 	var zrClient *zanredisdb.ZanRedisClient

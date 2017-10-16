@@ -24,11 +24,11 @@ type ControlCenter struct {
 }
 
 func NewControlCenter(serverAddrs string, backupFile string, ccTag string, ccEnv string) *ControlCenter {
+	ds.SetEnv(ccEnv)
+
 	cc := &ControlCenter{
 		d3client: ds.NewDccClient(serverAddrs, backupFile, ccTag),
 	}
-
-	ds.SetEnv(ccEnv)
 
 	return cc
 }
