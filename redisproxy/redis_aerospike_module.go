@@ -179,6 +179,26 @@ func (self *AerospikeRedisProxy) wrapParserRedisKeyAndField(f AsCommandFuncWithB
 	}
 }
 
+func (self *AerospikeRedisProxy) wrapParserRedisKeyExAndField(f AsCommandFuncWithBins) CommandFunc {
+	return func(c *Client, w ResponseWriter) error {
+		if len(c.Args) == 0 {
+			return ErrCmdParams
+		}
+		k, fields, err := parserRedisKeyExAndFields(c.Args)
+		if err != nil {
+			return err
+		}
+
+		self.UpdateStats(c.cmd, convAsKey2Table(k), 1)
+
+		if err := self.aerospikeAccessAuth(c.cmd, k, nil); err != nil {
+			return err
+		} else {
+			return f(c, k, fields, w)
+		}
+	}
+}
+
 //may only need to pass the client argument
 func (self *AerospikeRedisProxy) aerospikeAccessAuth(cmd string, key *as.Key, argEx [][]byte) error {
 	if self.whiteList == nil {
@@ -221,6 +241,8 @@ func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("hmget", self.wrapParserRedisKeyAndField(self.hmgetCommand))
 	router.Register("hmset", self.wrapParserRedisKeyAndField(self.hmsetCommand))
 	router.Register("hset", self.wrapParserRedisKeyAndField(self.hsetCommand))
+	router.Register("hsetex", self.wrapParserRedisKeyExAndField(self.hsetexCommand))
+	router.Register("hgetex", self.wrapParserRedisKeyExAndField(self.hgetexCommand))
 	router.Register("hdel", self.wrapParserRedisKeyAndField(self.hdelCommand))
 	router.Register("hexists", self.wrapParserRedisKeyAndField(self.hexistsCommand))
 	router.Register("hincrby", self.wrapParserRedisKeyAndField(self.hincrbyCommand))
@@ -245,6 +267,30 @@ func parserRedisKeyAndFields(args [][]byte) (*as.Key, []*as.Bin, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
+	var bins []*as.Bin
+	if len(args[1:])%2 == 0 {
+		fields := args[1:]
+		bins = make([]*as.Bin, 0, len(fields)/2)
+		for i := 0; i < len(fields)/2; i++ {
+			bin := as.NewBin(string(fields[i*2]), fields[i*2+1])
+			bins = append(bins, bin)
+		}
+	}
+
+	return key, bins, nil
+}
+
+func parserRedisKeyExAndFields(args [][]byte) (*as.Key, []*as.Bin, error) {
+	if len(args) < 2 {
+		return nil, nil, ErrCmdParams
+	}
+	key, err := parserRedisKey(string(args[0]))
+	if err != nil {
+		return nil, nil, err
+	}
+	// key expirets field ...
+	args = args[1:]
 
 	var bins []*as.Bin
 	if len(args[1:])%2 == 0 {

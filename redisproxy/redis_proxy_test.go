@@ -3,11 +3,12 @@ package redisproxy
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/siddontang/goredis"
 	"io/ioutil"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/siddontang/goredis"
 )
 
 const (
@@ -38,7 +39,9 @@ func (self *testLogger) OutputErr(depth int, s string) {
 func startTestRedisProxy(t *testing.T) *RedisProxy {
 	redisLog.Logger = newTestLogger(t)
 	configFile := "/tmp/redis-proxy-module-test.conf"
-	conf := &AerospikeRedisConf{[]string{testKVRemoteAddr}, 10}
+	conf := NewAerospikeRedisConf()
+	conf.AerospikeServers = []string{testKVRemoteAddr}
+	conf.Timeout = 10
 	d, _ := json.Marshal(conf)
 	err := ioutil.WriteFile(configFile, d, 0666)
 	if err != nil {
@@ -314,7 +317,53 @@ func TestRedisHash(t *testing.T) {
 	} else if n != 1 {
 		t.Fatal(n)
 	}
+	if _, err := goredis.Int(c.Do("hsetex", key, 3, 1, 2)); err != nil {
+		t.Fatal(err)
+	}
 
+	if n, err := goredis.Int(c.Do("hget", key, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("ttl", key)); err != nil {
+		t.Fatal(err)
+	} else if n > 3 {
+		t.Fatal(n)
+	} else if n < 1 {
+		t.Fatal(n)
+	} else {
+		t.Logf("ttl for hash: %v", n)
+	}
+
+	if n, err := goredis.Int(c.Do("hgetex", key, 6, 1)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("ttl", key)); err != nil {
+		t.Fatal(err)
+	} else if n > 6 {
+		t.Fatal(n)
+	} else if n <= 3 {
+		t.Fatal(n)
+	} else {
+		t.Logf("ttl for hash: %v", n)
+	}
+	// getex refreshed ttl
+	time.Sleep(time.Second * 4)
+	if n, err := goredis.Int(c.Do("hget", key, 1)); err != nil {
+		t.Fatalf("should not be deleted: %v", n)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+	time.Sleep(time.Second * 3)
+
+	if n, err := goredis.Int(c.Do("hget", key, 1)); err == nil {
+		t.Fatalf("should be deleted: %v", n)
+	}
 }
 
 func testRedisHashArrayPair(ay []interface{}, checkValues ...int) error {
@@ -556,6 +605,14 @@ func TestRedisHashErrorParams(t *testing.T) {
 	}
 
 	if _, err := c.Do("hgetall"); err == nil {
+		t.Fatal("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("hsetex", key); err == nil {
+		t.Fatal("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("hgetex", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 }

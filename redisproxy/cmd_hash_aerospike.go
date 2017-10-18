@@ -23,6 +23,81 @@ func (self *AerospikeRedisProxy) hsetCommand(c *Client, key *as.Key, bins []*as.
 	return nil
 }
 
+func (self *AerospikeRedisProxy) hsetexCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 4 {
+		return ErrCmdParams
+	}
+	if len(bins) != 1 {
+		return ErrCmdParams
+	}
+	duration, err := strconv.Atoi(string(args[1]))
+	if err != nil {
+		return ErrCmdParams
+	}
+	if duration < 1 {
+		return ErrCmdParams
+	}
+
+	policy := *self.asClient.DefaultWritePolicy
+	policy.Expiration = uint32(duration)
+
+	if err := self.asClient.PutBins(&policy, key, bins...); err != nil {
+		return err
+	} else {
+		w.WriteInteger(1)
+	}
+	return nil
+}
+
+func (self *AerospikeRedisProxy) hgetexCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 3 {
+		return ErrCmdParams
+	}
+	duration, err := strconv.Atoi(string(args[1]))
+	if err != nil {
+		return ErrCmdParams
+	}
+	if duration < 1 {
+		return ErrCmdParams
+	}
+	binName := string(args[2])
+	touchPolicy := *self.asClient.DefaultWritePolicy
+	touchPolicy.Expiration = uint32(duration)
+
+	v, err := self.asClient.Operate(&touchPolicy, key, as.TouchOp(), as.GetOpForBin(binName))
+	if err != nil {
+		return err
+	} else {
+		if v == nil {
+			w.WriteBulk(nil)
+		} else {
+			var resp []byte
+			d := v.Bins[binName]
+			switch vt := d.(type) {
+			case string:
+				resp = []byte(vt)
+			case []byte:
+				resp = vt
+			case int64:
+				resp = []byte(strconv.FormatInt(vt, 10))
+			case int32:
+				resp = []byte(strconv.FormatInt(int64(vt), 10))
+			case int:
+				resp = []byte(strconv.Itoa(vt))
+			case nil:
+				w.WriteBulk(nil)
+			default:
+				return ErrFieldValue
+			}
+			w.WriteBulk(resp)
+		}
+	}
+
+	return nil
+}
+
 func (self *AerospikeRedisProxy) hgetCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
 	args := c.Args
 	if len(args) != 2 {
