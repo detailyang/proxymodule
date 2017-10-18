@@ -45,6 +45,8 @@ func init() {
 		"json.type", "json.arrlen", "json.objlen",
 
 		"geodist", "geohash", "georadius", "georadiusbymember", "geopos",
+
+		"hgetex",
 	} {
 		ReadCommands[cmd] = struct{}{}
 	}
@@ -64,6 +66,8 @@ func init() {
 		"json.set", "json.del", "json.arrappend", "json.arrpop",
 
 		"geoadd",
+
+		"hsetex",
 	} {
 		WriteCommands[cmd] = struct{}{}
 	}
@@ -89,6 +93,8 @@ func init() {
 		"json.get", "json.keyexists", "json.type", "json.arrlen", "json.objlen",
 
 		"geodist", "geohash", "georadius", "georadiusbymember", "geopos", "geoadd",
+
+		"hgetex", "hsetex",
 	} {
 		unaryCommands[cmd] = struct{}{}
 	}
