@@ -242,6 +242,7 @@ func (self *AerospikeRedisProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("hmset", self.wrapParserRedisKeyAndField(self.hmsetCommand))
 	router.Register("hset", self.wrapParserRedisKeyAndField(self.hsetCommand))
 	router.Register("hsetex", self.wrapParserRedisKeyExAndField(self.hsetexCommand))
+	router.Register("hdelex", self.wrapParserRedisKeyExAndField(self.hdelexCommand))
 	router.Register("hgetex", self.wrapParserRedisKeyExAndField(self.hgetexCommand))
 	router.Register("hdel", self.wrapParserRedisKeyAndField(self.hdelCommand))
 	router.Register("hexists", self.wrapParserRedisKeyAndField(self.hexistsCommand))

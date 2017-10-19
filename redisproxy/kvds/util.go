@@ -67,7 +67,7 @@ func init() {
 
 		"geoadd",
 
-		"hsetex",
+		"hsetex", "hdelex",
 	} {
 		WriteCommands[cmd] = struct{}{}
 	}
@@ -94,7 +94,7 @@ func init() {
 
 		"geodist", "geohash", "georadius", "georadiusbymember", "geopos", "geoadd",
 
-		"hgetex", "hsetex",
+		"hgetex", "hsetex", "hdelex",
 	} {
 		unaryCommands[cmd] = struct{}{}
 	}

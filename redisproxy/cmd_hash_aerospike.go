@@ -50,6 +50,34 @@ func (self *AerospikeRedisProxy) hsetexCommand(c *Client, key *as.Key, bins []*a
 	return nil
 }
 
+func (self *AerospikeRedisProxy) hdelexCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
+	args := c.Args
+	if len(args) != 3 {
+		return ErrCmdParams
+	}
+	delBin := as.NewBin(string(args[2]), nil)
+
+	duration, err := strconv.Atoi(string(args[1]))
+	if err != nil {
+		return ErrCmdParams
+	}
+	if duration < 1 {
+		return ErrCmdParams
+	}
+
+	touchPolicy := *self.asClient.DefaultWritePolicy
+	touchPolicy.Expiration = uint32(duration)
+
+	_, err = self.asClient.Operate(&touchPolicy, key, as.PutOp(delBin), as.TouchOp())
+	if err != nil {
+		w.WriteInteger(0)
+	} else {
+		w.WriteInteger(1)
+	}
+
+	return nil
+}
+
 func (self *AerospikeRedisProxy) hgetexCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
 	args := c.Args
 	if len(args) != 3 {
@@ -87,7 +115,7 @@ func (self *AerospikeRedisProxy) hgetexCommand(c *Client, key *as.Key, bins []*a
 			case int:
 				resp = []byte(strconv.Itoa(vt))
 			case nil:
-				w.WriteBulk(nil)
+				resp = nil
 			default:
 				return ErrFieldValue
 			}
@@ -125,7 +153,7 @@ func (self *AerospikeRedisProxy) hgetCommand(c *Client, key *as.Key, bins []*as.
 			case int:
 				resp = []byte(strconv.Itoa(vt))
 			case nil:
-				w.WriteBulk(nil)
+				resp = nil
 			default:
 				return ErrFieldValue
 			}
@@ -160,15 +188,19 @@ func (self *AerospikeRedisProxy) hexistsCommand(c *Client, key *as.Key, bins []*
 
 func (self *AerospikeRedisProxy) hdelCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
 	args := c.Args
-	if len(args) != 2 {
+	if len(args) < 2 {
 		return ErrCmdParams
 	}
-	delBin := as.NewBin(string(args[1]), nil)
+	delBins := make([]*as.Bin, 0, len(args[1:]))
+	for _, arg := range args[1:] {
+		delBin := as.NewBin(string(arg), nil)
+		delBins = append(delBins, delBin)
+	}
 
-	if err := self.asClient.PutBins(nil, key, delBin); err != nil {
+	if err := self.asClient.PutBins(nil, key, delBins...); err != nil {
 		w.WriteInteger(0)
 	} else {
-		w.WriteInteger(1)
+		w.WriteInteger(int64(len(delBins)))
 	}
 
 	return nil

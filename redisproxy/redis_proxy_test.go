@@ -269,9 +269,7 @@ func TestRedisHash(t *testing.T) {
 
 	key := []byte("test:test-redis-proxy:ha")
 	defer func() {
-		if _, err := goredis.Int(c.Do("expire", key, 1)); err != nil {
-			t.Fatal(err)
-		}
+		goredis.Int(c.Do("expire", key, 1))
 		time.Sleep(time.Second)
 	}()
 	if n, err := goredis.Int(c.Do("exists", key)); err != nil {
@@ -359,9 +357,70 @@ func TestRedisHash(t *testing.T) {
 	} else if n != 2 {
 		t.Fatal(n)
 	}
+
 	time.Sleep(time.Second * 3)
 
 	if n, err := goredis.Int(c.Do("hget", key, 1)); err == nil {
+		t.Fatalf("should be deleted: %v", n)
+	}
+
+	if _, err := goredis.Int(c.Do("hsetex", key, 3, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goredis.Int(c.Do("hsetex", key, 3, 2, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := goredis.Int(c.Do("hget", key, 2)); err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+
+	if n, err := goredis.Int(c.Do("ttl", key)); err != nil {
+		t.Fatal(err)
+	} else if n > 3 {
+		t.Fatal(n)
+	} else if n < 1 {
+		t.Fatal(n)
+	} else {
+		t.Logf("ttl for hash: %v", n)
+	}
+
+	time.Sleep(time.Second)
+	if _, err := goredis.Int(c.Do("hdelex", key, 5, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := goredis.Int(c.Do("hget", key, 2)); err != nil {
+		t.Fatalf("should not be deleted: %v", n)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+	// should refresh ttl after hdelex
+	if n, err := goredis.Int(c.Do("ttl", key)); err != nil {
+		t.Fatal(err)
+	} else if n > 5 {
+		t.Fatal(n)
+	} else if n <= 4 {
+		t.Fatal(n)
+	} else {
+		t.Logf("ttl for hash: %v", n)
+	}
+
+	time.Sleep(time.Second * 3)
+
+	if n, err := goredis.Int(c.Do("hget", key, 1)); err == nil {
+		t.Fatalf("should be deleted: %v", n)
+	}
+
+	if n, err := goredis.Int(c.Do("hget", key, 2)); err != nil {
+		t.Log(c.Do("hgetall", key))
+		t.Log(c.Do("hget", key, 2))
+		t.Fatalf("should not be deleted: %v, err: %v", n, err)
+	} else if n != 2 {
+		t.Fatal(n)
+	}
+	time.Sleep(time.Second * 3)
+	if n, err := goredis.Int(c.Do("hget", key, 2)); err == nil {
 		t.Fatalf("should be deleted: %v", n)
 	}
 }
@@ -483,14 +542,9 @@ func TestRedisHashM(t *testing.T) {
 		}
 	}
 
-	if n, err := goredis.Int(c.Do("hdel", key, 1)); err != nil {
+	if n, err := goredis.Int(c.Do("hdel", key, 1, 2)); err != nil {
 		t.Fatal(err)
-	} else if n != 1 {
-		t.Fatal(n)
-	}
-	if n, err := goredis.Int(c.Do("hdel", key, 2)); err != nil {
-		t.Fatal(err)
-	} else if n != 1 {
+	} else if n != 2 {
 		t.Fatal(n)
 	}
 	if n, err := goredis.Int(c.Do("hdel", key, 3)); err != nil {
@@ -613,6 +667,10 @@ func TestRedisHashErrorParams(t *testing.T) {
 	}
 
 	if _, err := c.Do("hgetex", key); err == nil {
+		t.Fatal("invalid err of %v", err)
+	}
+
+	if _, err := c.Do("hdelex", key); err == nil {
 		t.Fatal("invalid err of %v", err)
 	}
 }
