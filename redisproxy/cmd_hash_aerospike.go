@@ -1,10 +1,19 @@
 package redisproxy
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
 	as "github.com/aerospike/aerospike-client-go"
+)
+
+const (
+	hashFieldMaxSize = 14
+)
+
+var (
+	ErrHashFieldSizeTooLong = errors.New("Hash field length greater than 14 bytes.")
 )
 
 func (self *AerospikeRedisProxy) hsetCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
@@ -15,6 +24,13 @@ func (self *AerospikeRedisProxy) hsetCommand(c *Client, key *as.Key, bins []*as.
 	if len(bins) != 1 {
 		return ErrCmdParams
 	}
+
+	for _, bin := range bins {
+		if len(bin.Name) > hashFieldMaxSize {
+			return ErrHashFieldSizeTooLong
+		}
+	}
+
 	if err := self.asClient.PutBins(nil, key, bins...); err != nil {
 		return err
 	} else {
@@ -23,6 +39,7 @@ func (self *AerospikeRedisProxy) hsetCommand(c *Client, key *as.Key, bins []*as.
 	return nil
 }
 
+// hsetex key ttl field value
 func (self *AerospikeRedisProxy) hsetexCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
 	args := c.Args
 	if len(args) != 4 {
@@ -42,6 +59,12 @@ func (self *AerospikeRedisProxy) hsetexCommand(c *Client, key *as.Key, bins []*a
 	policy := *self.asClient.DefaultWritePolicy
 	policy.Expiration = uint32(duration)
 
+	for _, bin := range bins {
+		if len(bin.Name) > hashFieldMaxSize {
+			return ErrHashFieldSizeTooLong
+		}
+	}
+
 	if err := self.asClient.PutBins(&policy, key, bins...); err != nil {
 		return err
 	} else {
@@ -50,12 +73,18 @@ func (self *AerospikeRedisProxy) hsetexCommand(c *Client, key *as.Key, bins []*a
 	return nil
 }
 
+// hdelex key ttl field
 func (self *AerospikeRedisProxy) hdelexCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
 	args := c.Args
 	if len(args) != 3 {
 		return ErrCmdParams
 	}
+
 	delBin := as.NewBin(string(args[2]), nil)
+	if len(delBin.Name) > hashFieldMaxSize {
+		w.WriteInteger(0)
+		return nil
+	}
 
 	duration, err := strconv.Atoi(string(args[1]))
 	if err != nil {
@@ -78,6 +107,7 @@ func (self *AerospikeRedisProxy) hdelexCommand(c *Client, key *as.Key, bins []*a
 	return nil
 }
 
+// hgetex key ttl field
 func (self *AerospikeRedisProxy) hgetexCommand(c *Client, key *as.Key, bins []*as.Bin, w ResponseWriter) error {
 	args := c.Args
 	if len(args) != 3 {
@@ -90,7 +120,12 @@ func (self *AerospikeRedisProxy) hgetexCommand(c *Client, key *as.Key, bins []*a
 	if duration < 1 {
 		return ErrCmdParams
 	}
+
 	binName := string(args[2])
+	if len(binName) > hashFieldMaxSize {
+		w.WriteBulk(nil)
+		return nil
+	}
 	touchPolicy := *self.asClient.DefaultWritePolicy
 	touchPolicy.Expiration = uint32(duration)
 
@@ -133,6 +168,11 @@ func (self *AerospikeRedisProxy) hgetCommand(c *Client, key *as.Key, bins []*as.
 	}
 
 	binName := string(args[1])
+	if len(binName) > hashFieldMaxSize {
+		w.WriteBulk(nil)
+		return nil
+	}
+
 	if v, err := self.asClient.Get(nil, key, binName); err != nil {
 		return err
 	} else {
@@ -170,16 +210,21 @@ func (self *AerospikeRedisProxy) hexistsCommand(c *Client, key *as.Key, bins []*
 		return ErrCmdParams
 	}
 	binName := string(args[1])
-	if v, err := self.asClient.Get(nil, key, binName); err != nil {
-		return err
+
+	if len(binName) > hashFieldMaxSize {
+		w.WriteInteger(0)
 	} else {
-		if v == nil {
-			w.WriteInteger(0)
+		if v, err := self.asClient.Get(nil, key, binName); err != nil {
+			return err
 		} else {
-			if _, ok := v.Bins[binName]; ok {
-				w.WriteInteger(1)
-			} else {
+			if v == nil {
 				w.WriteInteger(0)
+			} else {
+				if _, ok := v.Bins[binName]; ok {
+					w.WriteInteger(1)
+				} else {
+					w.WriteInteger(0)
+				}
 			}
 		}
 	}
@@ -193,8 +238,11 @@ func (self *AerospikeRedisProxy) hdelCommand(c *Client, key *as.Key, bins []*as.
 	}
 	delBins := make([]*as.Bin, 0, len(args[1:]))
 	for _, arg := range args[1:] {
-		delBin := as.NewBin(string(arg), nil)
-		delBins = append(delBins, delBin)
+		// Ignore the fields longer than hashFieldMaxSize.
+		if len(arg) <= hashFieldMaxSize {
+			delBin := as.NewBin(string(arg), nil)
+			delBins = append(delBins, delBin)
+		}
 	}
 
 	if err := self.asClient.PutBins(nil, key, delBins...); err != nil {
@@ -210,6 +258,10 @@ func (self *AerospikeRedisProxy) hincrbyCommand(c *Client, key *as.Key, bins []*
 	args := c.Args
 	if len(args) != 3 {
 		return ErrCmdParams
+	}
+
+	if len(args[1]) > hashFieldMaxSize {
+		return ErrHashFieldSizeTooLong
 	}
 
 	increment, err := strconv.ParseInt(string(args[2]), 10, 64)
@@ -236,6 +288,12 @@ func (self *AerospikeRedisProxy) hmsetCommand(c *Client, key *as.Key, bins []*as
 		return ErrCmdParams
 	}
 
+	for _, bin := range bins {
+		if len(bin.Name) > hashFieldMaxSize {
+			return ErrHashFieldSizeTooLong
+		}
+	}
+
 	if err := self.asClient.PutBins(nil, key, bins...); err != nil {
 		return err
 	} else {
@@ -251,6 +309,8 @@ func (self *AerospikeRedisProxy) hmgetCommand(c *Client, key *as.Key, bins []*as
 		return ErrCmdParams
 	}
 
+	// There is no need to check the field size for MGET as the command would be sent
+	// to server if any valid field exists in arguments.
 	args = args[1:]
 	binNames := make([]string, 0, len(args))
 	for _, arg := range args {

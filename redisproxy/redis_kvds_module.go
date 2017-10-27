@@ -173,7 +173,7 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 
 		err = self.doCommand(ns, clster, c, &kvds.DummyRespWriter{})
 		if err != nil {
-			redisLog.Errorf("write failed at previous cluster [%s, %s], err:%s", ns, clster.Name, err.Error())
+			redisLog.Infof("write failed at previous cluster [%s, %s], err:%s", ns, clster.Name, err.Error())
 			return err
 		}
 	}
@@ -181,7 +181,7 @@ func (self *KVDSProxy) writeCmdExecute(c *Client, resp ResponseWriter) error {
 	redisLog.Debugf("write to current cluster [%s, %s], cmd: %s", ns, table, string(c.catGenericCommand()))
 
 	if err = self.doCommand(ns, &route.CurCluster, c, resp); err != nil {
-		redisLog.Errorf("write failed at current cluster [%s, %s], err:%s", ns,
+		redisLog.Infof("write failed at current cluster [%s, %s], err:%s", ns,
 			route.CurCluster.Name, err.Error())
 	}
 
@@ -219,7 +219,7 @@ func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
 
 			//Read current cluster at first.
 			if err := self.doCommand(ns, &route.CurCluster, c, respBuf); err != nil {
-				redisLog.Errorf("read [%s, %s] from current cluster:%s failed, error:%s, fallback to read previous cluster:%s",
+				redisLog.Infof("read [%s, %s] from current cluster:%s failed, error:%s, fallback to read previous cluster:%s",
 					ns, table, route.CurCluster.Name, err.Error(), route.PreCluster.Name)
 			} else {
 				respBuf.Flush()
