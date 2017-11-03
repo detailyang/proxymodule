@@ -21,7 +21,7 @@ const (
 
 type CodisHost struct {
 	addr     string
-	connPool *redis.Pool
+	connPool *redis.QueuePool
 }
 
 type CodisCluster struct {
@@ -87,9 +87,7 @@ func (cluster *CodisCluster) GetConn() (redis.Conn, error) {
 
 	cluster.Mutex.Unlock()
 
-	conn := connPool.Get()
-
-	return conn, nil
+	return connPool.Get(250 * time.Millisecond)
 }
 
 func (cluster *CodisCluster) Tend() {
@@ -144,13 +142,13 @@ func (cluster *CodisCluster) Tend() {
 
 	for addr, _ := range availableHosts {
 		newNode := &CodisHost{addr: addr}
-		newNode.connPool = &redis.Pool{
-			MaxIdle:      cluster.maxIdleConn,
-			MaxActive:    cluster.maxActiveConn,
-			IdleTimeout:  time.Duration(cluster.idleTimeout) * time.Second,
-			TestOnBorrow: testF,
-			Dial:         func() (redis.Conn, error) { return cluster.dialF(newNode.addr) },
-		}
+		newNode.connPool = redis.NewQueuePool(
+			func() (redis.Conn, error) { return cluster.dialF(newNode.addr) },
+			cluster.maxIdleConn,
+			cluster.maxActiveConn,
+		)
+		newNode.connPool.TestOnBorrow = testF
+		newNode.connPool.IdleTimeout = time.Duration(cluster.idleTimeout) * time.Second
 		redisLog.Infof("host:%v is available and come into service", newNode.addr)
 		newNodes = append(newNodes, newNode)
 	}
