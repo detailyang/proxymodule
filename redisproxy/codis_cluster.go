@@ -25,7 +25,7 @@ type CodisHost struct {
 }
 
 type CodisCluster struct {
-	sync.Mutex
+	sync.RWMutex
 	ServerList []CodisServer
 
 	rotate int64
@@ -74,10 +74,10 @@ func NewCodisCluster(conf *CodisProxyConf) *CodisCluster {
 }
 
 func (cluster *CodisCluster) GetConn() (redis.Conn, error) {
-	cluster.Mutex.Lock()
+	cluster.RLock()
 
 	if len(cluster.nodes) == 0 {
-		cluster.Mutex.Unlock()
+		cluster.RUnlock()
 		return nil, errors.New("no server is available right now")
 	}
 
@@ -85,7 +85,7 @@ func (cluster *CodisCluster) GetConn() (redis.Conn, error) {
 
 	connPool := cluster.nodes[picked].connPool
 
-	cluster.Mutex.Unlock()
+	cluster.RUnlock()
 
 	return connPool.Get(250 * time.Millisecond)
 }
@@ -117,11 +117,11 @@ func (cluster *CodisCluster) Tend() {
 	usedNodes := make([]*CodisHost, 0, len(cluster.ServerList))
 	newNodes := usedNodes[:0]
 
-	cluster.Mutex.Lock()
+	cluster.RLock()
 	for _, node := range cluster.nodes {
 		usedNodes = append(usedNodes, node)
 	}
-	cluster.Mutex.Unlock()
+	cluster.RUnlock()
 
 	var delNodes []*CodisHost
 	for _, node := range usedNodes {
@@ -154,9 +154,9 @@ func (cluster *CodisCluster) Tend() {
 	}
 
 	if len(availableHosts) != 0 || len(delNodes) != 0 {
-		cluster.Mutex.Lock()
+		cluster.Lock()
 		cluster.nodes = newNodes
-		cluster.Mutex.Unlock()
+		cluster.Unlock()
 	}
 
 	for _, node := range delNodes {
@@ -177,10 +177,10 @@ func (cluster *CodisCluster) tendNodes() {
 		case <-tendTicker.C:
 			cluster.Tend()
 		case <-cluster.quitC:
-			cluster.Mutex.Lock()
+			cluster.Lock()
 			nodes := cluster.nodes
 			cluster.nodes = []*CodisHost{}
-			cluster.Mutex.Unlock()
+			cluster.Unlock()
 			for _, node := range nodes {
 				node.connPool.Close()
 			}
