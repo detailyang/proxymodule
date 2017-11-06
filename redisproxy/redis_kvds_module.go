@@ -113,7 +113,8 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 			if err := self.namespace[ns].AddKVModule(cluster, &module); err != nil {
 				redisLog.Errorf("add kv module:%s into namespace:%s failed as:%s", cluster, ns, err.Error())
 			} else {
-				self.ModuleStats.(*kvds.Stats).AddMemStats(cluster, module.proxy.GetStats())
+				statsName := fmt.Sprintf("[%s, %s]", ns, cluster)
+				self.ModuleStats.(*kvds.Stats).AddMemStats(statsName, module.proxy.GetStats())
 				redisLog.Infof("kv module [%s, %s] of protocol:%s come into service", ns, cluster, conf.Protocol)
 			}
 		}
@@ -125,11 +126,11 @@ func (self *KVDSProxy) InitConf(loadConfig func(v interface{}) error) error {
 func (self *KVDSProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("info", self.commandInfo)
 
-	for cmd, _ := range kvds.WriteCommands {
+	for cmd, _ := range common.WriteCommands {
 		router.Register(cmd, self.writeCmdExecute)
 	}
 
-	for cmd, _ := range kvds.ReadCommands {
+	for cmd, _ := range common.ReadCommands {
 		router.Register(cmd, self.readCmdExecute)
 	}
 }
@@ -240,51 +241,8 @@ func (self *KVDSProxy) readCmdExecute(c *Client, resp ResponseWriter) error {
 	return self.doCommand(ns, &route.CurCluster, c, resp)
 }
 
-/*
-format of the command response
-# Namespace, 3 clusters in service
-#0.cluster-name
-protocol:AEROSPIKE
-#Info:
-....
-
-TODO, support section
-*/
-
 func (self *KVDSProxy) commandInfo(c *Client, resp ResponseWriter) error {
-	var info bytes.Buffer
-	buf := &bytes.Buffer{}
-	respWriter := NewRespWriter(bufio.NewWriter(buf))
-
-	for ns, clusters := range self.namespace {
-		info.WriteString(fmt.Sprintf("# %s, %d clusters in service\r\n", ns, len(clusters)))
-		index := 0
-		for name, cluster := range clusters {
-			info.WriteString(fmt.Sprintf("#%d.%s\r\n", index, name))
-			info.WriteString(fmt.Sprintf("protocol:%s\r\n", cluster.Protocol))
-			if cmdHandler, ok := cluster.handler.GetCmdHandler("info"); ok {
-				if err := cmdHandler(c, respWriter); err != nil {
-					redisLog.Warningf("command:info executed failed at cluster:[%s, %s]", ns, name)
-				} else {
-					respWriter.Flush()
-					//the response from command handle is in RESP protocol and we should remove the
-					//protocol header for human readable
-					rawData := bytes.SplitN(buf.Bytes(), respTerm, 2)
-					if len(rawData) == 2 {
-						info.WriteString("#Info:\r\n")
-						info.Write(bytes.TrimRight(rawData[1], "\r\n"))
-					}
-				}
-				buf.Reset()
-			}
-			info.WriteString("\r\n")
-			index++
-		}
-	}
-
-	info.WriteString(self.ModuleStats.String())
-	resp.WriteBulk(info.Bytes())
-
+	resp.WriteBulk([]byte(self.ModuleStats.String()))
 	return nil
 }
 

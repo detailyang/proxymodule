@@ -9,13 +9,6 @@ import (
 
 var (
 	log *common.LevelLogger
-
-	ReadCommands  map[string]struct{}
-	WriteCommands map[string]struct{}
-
-	unaryCommands  map[string]struct{}
-	multiCommands  map[string]struct{}
-	kvPairCommands map[string]struct{}
 )
 
 var (
@@ -27,95 +20,6 @@ var (
 const (
 	KeySep = ":"
 )
-
-func init() {
-	ReadCommands = make(map[string]struct{})
-	for _, cmd := range []string{
-		"get", "mget", "exists", "ttl", "hget",
-		"hgetall", "hmget", "hexists", "lrange", "llen",
-		"zrangebyscore", "zrange", "zrevrange", "zrevrangebyscore",
-		"zcard", "zrank", "zrevrank", "sismember",
-		"sinter", "sunion", "sdiff", "smembers", "scard",
-		"srandmember", "zcount",
-
-		"hkeys", "hlen", "lindex", "zscore", "zlexcount",
-		"zrangebylex", "lttl", "httl", "sttl", "zttl",
-
-		"json.get", "json.keyexists", "json.mkget",
-		"json.type", "json.arrlen", "json.objlen",
-
-		"geodist", "geohash", "georadius", "georadiusbymember", "geopos",
-
-		"hgetex",
-	} {
-		ReadCommands[cmd] = struct{}{}
-	}
-
-	WriteCommands = make(map[string]struct{})
-	for _, cmd := range []string{
-		"setnx", "del", "set", "setex", "expire",
-		"incr", "incrby", "decr", "decrby", "hmset",
-		"hset", "hdel", "hincrby", "mset", "rpush", "getset",
-		"lpush", "lrem", "sadd", "srem", "sinterstore", "sdiffstore", "sunionstore",
-		"spop", "zadd", "zremrangebyscore", "zrem",
-		"hclear", "lpop", "lset", "ltrim", "rpop", "lclear", "sclear", "smclear",
-		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
-		"persist", "lpersist", "hpersist", "spersist", "zpersist",
-		"expire", "lexpire", "hexpire", "sexpire", "zexpire",
-
-		"json.set", "json.del", "json.arrappend", "json.arrpop",
-
-		"geoadd",
-
-		"hsetex", "hdelex",
-	} {
-		WriteCommands[cmd] = struct{}{}
-	}
-
-	//category of commands according to the usage of KeyTransfer
-	unaryCommands = make(map[string]struct{})
-	for _, cmd := range []string{
-		"get", "set", "ttl", "hset", "hgetall", "hmget", "hexists",
-		"getset", "lrange", "llen", "zrangebyscore", "zrange", "zrevrange",
-		"zrevrangebyscore", "zcard", "zrank", "zrevrank", "sismember",
-		"smembers", "scard", "srandmember", "zcount",
-		"setnx", "setex", "expire", "incr", "incrby", "decr", "decrby",
-		"hmset", "hset", "hdel", "hincrby", "hget", "rpush", "getset",
-		"lpush", "lrem", "sadd", "srem", "spop", "zadd", "zrem", "zremrangebyscore",
-		"hkeys", "hlen", "lindex", "zscore", "zlexcount",
-		"zrangebylex",
-		"hclear", "lpop", "lset", "ltrim", "rpop", "lclear", "sclear", "smclear",
-		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
-		"lttl", "httl", "sttl", "zttl", "persist", "hpersist", "lpersist", "spersist", "zpersist",
-		"hexpire", "lexpire", "sexpire", "zexpire",
-
-		"json.set", "json.del", "json.arrappend", "json.arrpop",
-		"json.get", "json.keyexists", "json.type", "json.arrlen", "json.objlen",
-
-		"geodist", "geohash", "georadius", "georadiusbymember", "geopos", "geoadd",
-
-		"hgetex", "hsetex", "hdelex",
-	} {
-		unaryCommands[cmd] = struct{}{}
-	}
-
-	multiCommands = make(map[string]struct{})
-	for _, cmd := range []string{
-		"exists", "mget", "sinter", "sunion", "sdiff",
-		"del", "sinterstore", "sdiffstore", "sunionstore",
-		"json.mkget",
-	} {
-		multiCommands[cmd] = struct{}{}
-	}
-
-	kvPairCommands = make(map[string]struct{})
-	for _, cmd := range []string{
-		"mset",
-	} {
-		kvPairCommands[cmd] = struct{}{}
-	}
-
-}
 
 func SetLogger(l *common.LevelLogger) {
 	log = l
@@ -185,14 +89,14 @@ func ExtractNamespceTable(cmd string, Args [][]byte) (namespace string, table st
 		return
 	}
 	var key *KVDSKey
-	if _, ok := unaryCommands[cmd]; ok {
+	if _, ok := common.UnaryCommands[cmd]; ok {
 		if key, err = ParseRedisKey(string(Args[0])); err == nil {
 			namespace, table = key.Namespace, key.Table
 		}
 		return
 	}
 	for i, Arg := range Args {
-		if _, ok := kvPairCommands[cmd]; ok && i%2 != 0 {
+		if _, ok := common.KVPairCommands[cmd]; ok && i%2 != 0 {
 			continue
 		}
 		if key, err = ParseRedisKey(string(Arg)); err != nil {

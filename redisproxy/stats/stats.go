@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/absolute8511/proxymodule/common"
 )
 
 type ModuleStats interface {
@@ -21,84 +23,118 @@ const (
 	statsStringHeader = "#Statistic\r\n"
 )
 
-type TableStats map[string]uint64
-
-func (s TableStats) IncrBy(t string, deta uint64) {
-	s[t] += deta
+type TableStats struct {
+	sync.RWMutex
+	data  map[string]*uint64
+	total uint64
 }
 
-func (s TableStats) Incr(t string) {
+func (s *TableStats) IncrBy(t string, deta uint64) {
+	s.RLock()
+	v, ok := s.data[t]
+	s.RUnlock()
+	if !ok {
+		s.Lock()
+		v := new(uint64)
+		*v = deta
+		s.data[t] = v
+		s.Unlock()
+	} else {
+		atomic.AddUint64(v, deta)
+	}
+
+	atomic.AddUint64(&s.total, deta)
+}
+
+func (s *TableStats) Total() uint64 {
+	return atomic.LoadUint64(&s.total)
+}
+
+func (s *TableStats) Incr(t string) {
 	s.IncrBy(t, 1)
 }
 
-func NewTableStats() TableStats {
-	return make(map[string]uint64)
+func (s *TableStats) Empty() bool {
+	return atomic.LoadUint64(&s.total) == 0
+}
+
+func (s *TableStats) String() string {
+	var buf bytes.Buffer
+	s.RLock()
+	for t, v := range s.data {
+		buf.WriteString(fmt.Sprintf("%s:%d\r\n", t, atomic.LoadUint64(v)))
+	}
+	s.RUnlock()
+	buf.WriteString(fmt.Sprintf("total:%d\r\n", atomic.LoadUint64(&s.total)))
+
+	return buf.String()
+}
+
+func (s *TableStats) Dump() interface{} {
+	d := make(map[string]uint64)
+	s.RLock()
+	for t, v := range s.data {
+		d[t] = atomic.LoadUint64(v)
+	}
+	s.RUnlock()
+	return d
+}
+
+func NewTableStats() *TableStats {
+	return &TableStats{
+		data: make(map[string]*uint64),
+	}
 }
 
 type CmdStats struct {
 	sync.Mutex
-	stats map[string]TableStats
+	stats map[string]*TableStats
 }
 
 func NewCmdStats() *CmdStats {
-	return &CmdStats{
-		stats: make(map[string]TableStats),
+	s := &CmdStats{
+		stats: make(map[string]*TableStats),
+	}
+
+	for cmd, _ := range common.ReadCommands {
+		s.stats[cmd] = NewTableStats()
+	}
+
+	for cmd, _ := range common.WriteCommands {
+		s.stats[cmd] = NewTableStats()
+	}
+	return s
+}
+
+func (cs *CmdStats) updateStats(cmd string, table string, deta uint64) {
+	if ts, ok := cs.stats[cmd]; ok {
+		ts.IncrBy(table, deta)
 	}
 }
 
-func (cs *CmdStats) updateStats(redCmd string, t string, deta uint64) {
-	cs.Lock()
-	if ts, ok := cs.stats[redCmd]; !ok {
-		newTs := NewTableStats()
-		newTs.IncrBy(t, deta)
-		cs.stats[redCmd] = newTs
-	} else {
-		ts.IncrBy(t, deta)
-	}
-	cs.Unlock()
-}
-
-func (cs *CmdStats) Copy() map[string]TableStats {
-	cs.Lock()
-	if len(cs.stats) == 0 {
-		cs.Unlock()
-		return nil
-	}
-	cStats := make(map[string]TableStats, len(cs.stats))
-	for redCmd, ts := range cs.stats {
-		newTs := NewTableStats()
-		for t, v := range ts {
-			newTs[t] = v
+func (cs *CmdStats) Copy() interface{} {
+	copied := make(map[string]interface{})
+	for cmd, ts := range cs.stats {
+		if ts.Empty() {
+			continue
 		}
-		cStats[redCmd] = newTs
+		copied[cmd] = ts.Dump()
 	}
-	cs.Unlock()
-	return cStats
+	return copied
 }
 
 func (cs *CmdStats) String() string {
-	cs.Lock()
-	if len(cs.stats) == 0 {
-		cs.Unlock()
-		return ""
-	}
-
-	var buffer bytes.Buffer
+	var buf bytes.Buffer
 	var total uint64
-	for redCmd, ts := range cs.stats {
-		var sum uint64
-		for t, count := range ts {
-			sum += count
-			buffer.WriteString(fmt.Sprintf("%s %s:%d\r\n",
-				redCmd, t, count))
+	for cmd, ts := range cs.stats {
+		if !ts.Empty() {
+			buf.WriteString(fmt.Sprintf("%s:%d\r\n", cmd, ts.Total()))
+			buf.WriteString(ts.String())
+			total += ts.Total()
 		}
-		buffer.WriteString(fmt.Sprintf("%s:%d\r\n", redCmd, sum))
-		total += sum
 	}
-	cs.Unlock()
-	buffer.WriteString(fmt.Sprintf("total:%d\r\n", total))
-
-	return buffer.String()
+	buf.WriteString(fmt.Sprintf("total:%d\r\n", total))
+	return buf.String()
 }
 
 type SlowStats struct {
@@ -221,12 +257,15 @@ func (self *ProxyModuleStats) GetStatsData() interface{} {
 		Failed     uint64      `json:"failed,omitempty"`
 		AccumuCost uint64      `json:"accumulate_cost,omitempty"`
 	}{}
+
 	if cStats := self.stats.Copy(); cStats != nil {
 		stats.CmdStats = cStats
 	}
+
 	if cSlow := self.slow.Copy(); cSlow != nil {
 		stats.SlowStats = cSlow
 	}
+
 	stats.Failed = atomic.LoadUint64(&self.failed)
 	stats.AccumuCost = atomic.LoadUint64(&self.accumuCost) / 1000
 	return &stats

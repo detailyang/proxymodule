@@ -38,13 +38,13 @@ func (conv *KeyConvert) Convert(cmd string, args [][]byte) [][]byte {
 	newArgs := make([][]byte, len(args))
 	copy(newArgs, args)
 
-	if _, ok := unaryCommands[cmd]; ok {
+	if _, ok := common.UnaryCommands[cmd]; ok {
 		newArgs[0] = conv.convSingleK(args[0])
-	} else if _, ok := multiCommands[cmd]; ok {
+	} else if _, ok := common.MultiCommands[cmd]; ok {
 		for i, arg := range args {
 			newArgs[i] = conv.convSingleK(arg)
 		}
-	} else if _, ok := kvPairCommands[cmd]; ok {
+	} else if _, ok := common.KVPairCommands[cmd]; ok {
 		if len(args)%2 == 0 {
 			for i := 0; i < len(args)/2; i++ {
 				newArgs[i*2] = conv.convSingleK(args[i*2])
@@ -112,7 +112,7 @@ type GradationStrategy struct {
 }
 
 type AccessControl struct {
-	sync.Mutex
+	sync.RWMutex
 	tblRoute map[string]*Route
 }
 
@@ -153,15 +153,15 @@ func (ac *AccessControl) updateTblRoute(e *common.CCEvent) {
 		}
 	}
 
-	ac.Mutex.Lock()
+	ac.Lock()
 	ac.tblRoute = tblRoute
-	ac.Mutex.Unlock()
+	ac.Unlock()
 }
 
 func (ac *AccessControl) GetTableRoute(namespace string, table string) (*Route, error) {
-	ac.Mutex.Lock()
+	ac.RLock()
 	tblRoute := ac.tblRoute
-	ac.Mutex.Unlock()
+	ac.RUnlock()
 
 	lookUpKey := routeLookupKey(namespace, table)
 	route, ok := tblRoute[lookUpKey]
