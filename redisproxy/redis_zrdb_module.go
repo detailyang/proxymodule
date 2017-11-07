@@ -89,6 +89,7 @@ func (proxy *ZRDBProxy) RegisterCmd(router *CmdRouter) {
 	router.Register("persist", commandSingleKeyExec(proxy))
 	router.Register("setex", commandSingleKeyExec(proxy))
 	router.Register("setnx", commandSingleKeyExec(proxy))
+	router.Register("incr", commandSingleKeyExec(proxy))
 	router.Register("exists", commandMultiKeyExec(proxy))
 	router.Register("mset", commandMultiKVExec(proxy))
 	router.Register("mget", proxy.mgetCommand)
