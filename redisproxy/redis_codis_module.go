@@ -2,19 +2,17 @@ package redisproxy
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/absolute8511/proxymodule/common"
 	"github.com/absolute8511/proxymodule/redisproxy/stats"
 	"github.com/absolute8511/redigo/redis"
 	"github.com/bluele/gcache"
-)
-
-var (
-	supportedCommands []string
 )
 
 type CodisServer struct {
@@ -43,23 +41,6 @@ type CodisProxy struct {
 
 func init() {
 	RegisterRedisProxyModule("codis-proxy", CreateCodisProxy)
-
-	supportedCommands = []string{
-		"mget", "setnx", "del",
-		"set", "setex", "exists", "expire",
-		"ttl", "incr", "incrby", "decr",
-		"decrby", "hget", "hgetall", "hmget",
-		"hmset", "hset", "hdel", "hexists",
-		"hincrby", "mset", "rpush", "getset",
-		"lpush", "lrange", "llen", "lrem",
-		"zrangebyscore", "zrange", "zrevrange", "zrevrangebyscore",
-		"zcard", "zrank", "zrevrank", "sadd",
-		"srem", "sismember", "sinterstore", "sdiffstore",
-		"sinter", "sunion", "ssize", "keys",
-		"sdiff", "smembers", "spop", "scard",
-		"srandmember", "zadd", "zremrangebyscore", "zrem",
-		"zcount",
-	}
 }
 
 func CreateCodisProxy() RedisProxyModule {
@@ -70,10 +51,6 @@ func CreateCodisProxy() RedisProxyModule {
 
 func (proxy *CodisProxy) GetProxyName() string {
 	return "codis-proxy"
-}
-
-func (proxy *CodisProxy) SupportedCommands() []string {
-	return supportedCommands
 }
 
 func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
@@ -96,105 +73,107 @@ func (proxy *CodisProxy) InitConf(loadConfig func(v interface{}) error) error {
 	return nil
 }
 
-func (proxy *CodisProxy) getCommand(c *Client, resp ResponseWriter) error {
+func (proxy *CodisProxy) readCommand(c *Client, resp ResponseWriter) error {
+	if len(c.Args) > 0 {
+		proxy.UpdateStats(c.cmd, codisKey2Table(c.Args[0]), 1)
+	}
+
+	var needCache bool = false
+	var value interface{}
+	var cacheKey string
+	if c.cmd == "get" {
+		//Try to get value from local-cache first.
+		cacheKey = string(c.catGenericCommand())
+		value, needCache = proxy.localCache.Get(cacheKey)
+		if value != nil {
+			WriteValue(resp, value)
+			return nil
+		}
+	}
+
+	cmdArgs := make([]interface{}, len(c.Args))
+	for i, v := range c.Args {
+		cmdArgs[i] = v
+	}
+
+	reply, err := proxy.doCommand(c.cmd, cmdArgs...)
+	if err == nil {
+		WriteValue(resp, reply)
+		if needCache {
+			var size int = 1
+			if c.cmd == "get" {
+				if b, err := redis.Bytes(reply, nil); err == nil {
+					size = len(b)
+				}
+			}
+			proxy.localCache.Set(cacheKey, reply, size)
+		}
+	}
+	return err
+}
+
+func (proxy *CodisProxy) writeCommand(c *Client, resp ResponseWriter) error {
 	if len(c.Args) < 1 {
 		return ErrCmdParams
 	}
 
 	proxy.UpdateStats(c.cmd, codisKey2Table(c.Args[0]), 1)
 
-	key := string(c.Args[0])
+	cmdArgs := make([]interface{}, len(c.Args))
+	for i, v := range c.Args {
+		cmdArgs[i] = v
+	}
 
-	//Get value from local-cache first.
-	value, needCache := proxy.localCache.Get(key)
-	if value != nil {
-		resp.WriteBulk(value)
+	if reply, err := proxy.doCommand(c.cmd, cmdArgs...); err == nil {
+		WriteValue(resp, reply)
 		return nil
+	} else {
+		return err
+	}
+}
+
+func (proxy *CodisProxy) doCommand(cmd string, cmdArgs ...interface{}) (interface{}, error) {
+	maxRetry := int(len(proxy.conf.ServerList)/2) + 1
+	if maxRetry < 3 {
+		maxRetry = 3
 	}
 
 	var reply interface{}
 	var err error
 	var conn redis.Conn
 
-	maxRetry := int(len(proxy.conf.ServerList)/2) + 1
-	if maxRetry < 3 {
-		maxRetry = 3
-	}
-
 	for i := 0; i < maxRetry; i++ {
-		if conn, err = proxy.cluster.GetConn(); err != nil {
+		conn, err = proxy.cluster.GetConn()
+		if err != nil {
 			redisLog.Warningf("command execute failed [%d, %s], err: %s",
-				i, c.catGenericCommand(), err.Error())
+				i, cmd, err.Error())
 			continue
 		}
-		if reply, err = conn.Do(c.cmd, c.Args[0]); err != nil {
+
+		if reply, err = conn.Do(cmd, cmdArgs...); err != nil {
 			conn.Close()
-			redisLog.Warningf("command execute failed [%d, %s], err: %s", i,
-				c.catGenericCommand(), err.Error())
-			continue
+			redisLog.Warningf("command execute failed [%d, %s], err: %s",
+				i, cmd, err.Error())
+		} else {
+			conn.Close()
+			return reply, nil
 		}
-
-		WriteValue(resp, reply)
-		conn.Close()
-		if needCache {
-			if v, ok := reply.([]byte); ok {
-				proxy.localCache.Set(key, v)
-			}
-		}
-		return nil
 	}
-
-	return err
+	return nil, err
 }
 
 func (proxy *CodisProxy) RegisterCmd(router *CmdRouter) {
-	maxRetry := int(len(proxy.conf.ServerList)/2) + 1
-	if maxRetry < 3 {
-		maxRetry = 3
+	for readCmd, _ := range common.ReadCommands {
+		router.Register(readCmd, proxy.readCommand)
 	}
 
-	commandExec := func(c *Client, resp ResponseWriter) error {
-		if len(c.Args) < 1 {
-			return ErrCmdParams
-		}
-
-		cmdArgs := make([]interface{}, len(c.Args))
-		for i, v := range c.Args {
-			cmdArgs[i] = v
-		}
-
-		proxy.UpdateStats(c.cmd, codisKey2Table(c.Args[0]), 1)
-
-		var reply interface{}
-		var err error
-		var conn redis.Conn
-
-		for i := 0; i < maxRetry; i++ {
-			conn, err = proxy.cluster.GetConn()
-			if err != nil {
-				redisLog.Warningf("command execute failed [%d, %s], err: %s",
-					i, c.catGenericCommand(), err.Error())
-			} else {
-				if reply, err = conn.Do(c.cmd, cmdArgs...); err != nil {
-					conn.Close()
-					redisLog.Warningf("command execute failed [%d, %s], err: %s", i,
-						c.catGenericCommand(), err.Error())
-				} else {
-					WriteValue(resp, reply)
-					conn.Close()
-					return nil
-				}
-			}
-		}
-
-		return err
+	for writeCmd, _ := range common.WriteCommands {
+		router.Register(writeCmd, proxy.writeCommand)
 	}
 
-	for _, cmd := range supportedCommands {
-		router.Register(cmd, commandExec)
-	}
+	router.Register("eval", proxy.writeCommand)
+	router.Register("info", proxy.readCommand)
 
-	router.Register("get", proxy.getCommand)
 	router.Register("addcache", proxy.addCacheCmd)
 	router.Register("delcache", proxy.delCacheCmd)
 	router.Register("cachepruge", proxy.cachePrugeCmd)
@@ -233,7 +212,7 @@ func NewPrefixLocalCache() *PrefixLocalCache {
 	}
 }
 
-func (c *PrefixLocalCache) Set(key string, value []byte) error {
+func (c *PrefixLocalCache) Set(key string, value interface{}, size int) error {
 	var lc *localCache
 	c.RLock()
 	for prefix, v := range c.cache {
@@ -244,7 +223,7 @@ func (c *PrefixLocalCache) Set(key string, value []byte) error {
 	}
 	c.RUnlock()
 	if lc != nil {
-		if len(value) > lc.Threshold {
+		if size > lc.Threshold {
 			return lc.Set(key, value)
 		}
 	}
@@ -252,7 +231,7 @@ func (c *PrefixLocalCache) Set(key string, value []byte) error {
 	return nil
 }
 
-func (c *PrefixLocalCache) Get(key string) ([]byte, bool) {
+func (c *PrefixLocalCache) Get(key string) (interface{}, bool) {
 	var lc *localCache
 	c.RLock()
 	for prefix, v := range c.cache {
@@ -267,7 +246,7 @@ func (c *PrefixLocalCache) Get(key string) ([]byte, bool) {
 		if v, err := lc.Get(key); err != nil {
 			return nil, true
 		} else {
-			return v.([]byte), true
+			return v, true
 		}
 	}
 
@@ -321,7 +300,7 @@ func (c *PrefixLocalCache) Info() []byte {
 	buf := new(bytes.Buffer)
 	c.RLock()
 	for prefix, lc := range c.cache {
-		buf.WriteString(fmt.Sprintf("[%s]: %d, Threshold:%dByte, HitCount:%d, MissCount:%d, HitRate:%f", prefix,
+		buf.WriteString(fmt.Sprintf("[%s]: %d, Threshold:%dByte, HitCount:%d, MissCount:%d, HitRate:%f; ", prefix,
 			lc.Len(), lc.Threshold, lc.HitCount(), lc.MissCount(), lc.HitRate()))
 	}
 	c.RUnlock()
@@ -329,13 +308,21 @@ func (c *PrefixLocalCache) Info() []byte {
 	return buf.Bytes()
 }
 
-// addcache prefix 50 B/KB/MB size ttl s/ms
+// addcache cachecmd 50 B/KB/MB size ttl s/ms arg0 args1
 func (proxy *CodisProxy) addCacheCmd(c *Client, resp ResponseWriter) error {
-	if len(c.Args) != 6 {
+	if len(c.Args) != 7 {
 		return ErrCmdParams
 	}
 
-	prefix := string(c.Args[0])
+	/*
+		if _, ok := common.ReadCommands[string(c.Args[0])]; !ok {
+			return errors.New("Can only cache read commands.")
+		}
+	*/
+	if string(c.Args[0]) != "get" {
+		return errors.New("Can only cache 'get' commands.")
+	}
+
 	threshold, err := strconv.Atoi(string(c.Args[1]))
 	if err != nil || threshold < 0 {
 		return ErrCmdParams
@@ -368,6 +355,11 @@ func (proxy *CodisProxy) addCacheCmd(c *Client, resp ResponseWriter) error {
 	default:
 		return ErrCmdParams
 	}
+
+	b := make([][]byte, 1+len(c.Args[6:]))
+	b[0] = c.Args[0]
+	copy(b[1:], c.Args[6:])
+	prefix := string(bytes.Join(b, []byte(" ")))
 
 	if err := proxy.localCache.AddCache(prefix, time.Duration(ttl)*time.Millisecond,
 		size, threshold); err != nil {

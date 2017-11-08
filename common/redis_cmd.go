@@ -42,7 +42,7 @@ func init() {
 		"hclear", "lpop", "lset", "ltrim", "rpop", "lclear", "sclear", "smclear",
 		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
 		"persist", "lpersist", "hpersist", "spersist", "zpersist",
-		"expire", "lexpire", "hexpire", "sexpire", "zexpire",
+		"expire", "lexpire", "hexpire", "sexpire", "zexpire", "pexpire",
 
 		"json.set", "json.del", "json.arrappend", "json.arrpop",
 
