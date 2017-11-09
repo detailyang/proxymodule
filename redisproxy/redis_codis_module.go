@@ -2,6 +2,7 @@ package redisproxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -173,6 +174,7 @@ func (proxy *CodisProxy) RegisterCmd(router *CmdRouter) {
 
 	router.Register("eval", proxy.writeCommand)
 	router.Register("info", proxy.readCommand)
+	router.Register("stats", proxy.statsCommand)
 
 	router.Register("addcache", proxy.addCacheCmd)
 	router.Register("delcache", proxy.delCacheCmd)
@@ -192,7 +194,7 @@ func codisKey2Table(ck []byte) string {
 	if parts := bytes.Split(ck, []byte(":")); len(parts) >= 2 {
 		return string(parts[0])
 	} else {
-		return "other"
+		return "others"
 	}
 }
 
@@ -371,13 +373,14 @@ func (proxy *CodisProxy) addCacheCmd(c *Client, resp ResponseWriter) error {
 
 }
 
-// delcache prefix
+// delcache command arg0 arg1 ...
 func (proxy *CodisProxy) delCacheCmd(c *Client, resp ResponseWriter) error {
-	if len(c.Args) != 1 {
+	if len(c.Args) < 1 {
 		return ErrCmdParams
 	}
 
-	if proxy.localCache.DelCache(string(c.Args[0])) {
+	cacheKey := string(bytes.Join(c.Args, []byte(" ")))
+	if proxy.localCache.DelCache(cacheKey) {
 		resp.WriteInteger(1)
 	} else {
 		resp.WriteInteger(0)
@@ -386,13 +389,14 @@ func (proxy *CodisProxy) delCacheCmd(c *Client, resp ResponseWriter) error {
 	return nil
 }
 
-// cachepruge prefix
+// cachepruge command arg0 arg1 ...
 func (proxy *CodisProxy) cachePrugeCmd(c *Client, resp ResponseWriter) error {
-	if len(c.Args) != 1 {
+	if len(c.Args) < 1 {
 		return ErrCmdParams
 	}
 
-	if proxy.localCache.Purge(string(c.Args[0])) {
+	cacheKey := string(bytes.Join(c.Args, []byte(" ")))
+	if proxy.localCache.Purge(cacheKey) {
 		resp.WriteInteger(1)
 	} else {
 		resp.WriteInteger(0)
@@ -404,5 +408,19 @@ func (proxy *CodisProxy) cachePrugeCmd(c *Client, resp ResponseWriter) error {
 // cacheinfo
 func (proxy *CodisProxy) cacheInfoCmd(c *Client, resp ResponseWriter) error {
 	resp.WriteBulk(proxy.localCache.Info())
+	return nil
+}
+
+// stats [json]
+func (proxy *CodisProxy) statsCommand(c *Client, resp ResponseWriter) error {
+	if len(c.Args) >= 1 && strings.ToLower(string(c.Args[0])) == "json" {
+		stats, err := json.Marshal(proxy.ModuleStats.GetStatsData())
+		if err != nil {
+			return err
+		}
+		resp.WriteBulk(stats)
+	} else {
+		resp.WriteBulk([]byte(proxy.ModuleStats.String()))
+	}
 	return nil
 }
