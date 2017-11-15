@@ -27,7 +27,7 @@ func init() {
 
 		"geodist", "geohash", "georadius", "georadiusbymember", "geopos",
 
-		"hgetex",
+		"hgetex", "type",
 	} {
 		ReadCommands[cmd] = struct{}{}
 	}
@@ -43,6 +43,7 @@ func init() {
 		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
 		"persist", "lpersist", "hpersist", "spersist", "zpersist",
 		"expire", "lexpire", "hexpire", "sexpire", "zexpire", "pexpire",
+		"expireat", "pexpireat", "rename",
 
 		"json.set", "json.del", "json.arrappend", "json.arrpop",
 
@@ -67,7 +68,8 @@ func init() {
 		"hclear", "lpop", "lset", "ltrim", "rpop", "lclear", "sclear", "smclear",
 		"zincrby", "zremrangebylex", "zclear", "zremrangebyrank",
 		"lttl", "httl", "sttl", "zttl", "persist", "hpersist", "lpersist", "spersist", "zpersist",
-		"hexpire", "lexpire", "sexpire", "zexpire",
+		"hexpire", "lexpire", "sexpire", "zexpire", "expireat", "pexpireat",
+		"type",
 
 		//Json extension.
 		"json.set", "json.del", "json.arrappend", "json.arrpop",
@@ -85,7 +87,7 @@ func init() {
 	for _, cmd := range []string{
 		"exists", "mget", "sinter", "sunion", "sdiff",
 		"del", "sinterstore", "sdiffstore", "sunionstore",
-		"json.mkget",
+		"json.mkget", "rename",
 	} {
 		MultiCommands[cmd] = struct{}{}
 	}
